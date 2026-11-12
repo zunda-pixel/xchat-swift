@@ -24,9 +24,9 @@ let package = Package(
         .package(url: "https://github.com/P-H-C/phc-winner-argon2.git", revision: "f57e61e19229e23c4445b85494dbf7c07de721cb"),
         .package(url: "https://github.com/trancee/blake-hash.git", exact: "1.1.1"),
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.11.0"),
-        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.10.0"),
-        .package(url: "https://github.com/apple/swift-collections.git", from: "1.2.0"),
-        .package(url: "https://github.com/apple/swift-algorithms.git", from: "1.2.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "5.1.1"),
+        .package(url: "https://github.com/apple/swift-collections.git", from: "1.7.6"),
+        .package(url: "https://github.com/apple/swift-algorithms.git", from: "1.2.1"),
     ],
     targets: [
         .target(
