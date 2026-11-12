@@ -4,13 +4,8 @@ import Foundation
 /// The DER SubjectPublicKeyInfo encoding of an uncompressed SEC1 P-256
 /// public key. Registration uploads this form, and the identity-key binding
 /// signatures are over it.
-func spkiDER(publicKey: [UInt8]) -> [UInt8] {
-    precondition(publicKey.count == 65, "SPKI encoding takes an uncompressed P-256 key")
-    let header: [UInt8] = [
-        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01,
-        0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
-    ]
-    return header + publicKey
+func spkiDER(publicKey: [UInt8]) throws -> [UInt8] {
+    Array(try parsePublicKey(publicKey).derRepresentation)
 }
 
 /// Generates a P-256 keypair: a 65-byte uncompressed public key
@@ -21,20 +16,31 @@ func generateKeyPair() -> (publicKey: [UInt8], privateKey: [UInt8]) {
     return (Array(key.publicKey.x963Representation), Array(key.rawRepresentation))
 }
 
-/// Parses a SEC1 P-256 public key: 33-byte compressed or 65-byte
-/// uncompressed. Off-curve points are rejected.
+/// Parses a P-256 public key in compressed SEC1, uncompressed SEC1, or SPKI DER.
 func parsePublicKey(_ bytes: [UInt8]) throws -> P256.KeyAgreement.PublicKey {
+    let key: P256.KeyAgreement.PublicKey
     do {
-        if bytes.count == 33 {
+        switch bytes.count {
+        case 33:
             return try P256.KeyAgreement.PublicKey(compressedRepresentation: bytes)
+        case 65:
+            return try P256.KeyAgreement.PublicKey(x963Representation: bytes)
+        default:
+            key = try P256.KeyAgreement.PublicKey(derRepresentation: bytes)
         }
-        return try P256.KeyAgreement.PublicKey(x963Representation: bytes)
     } catch {
         throw XChatError.invalidInput("Invalid public key: \(error)")
     }
+
+    // Swift Crypto can decode a point without checking that its SPKI algorithm
+    // identifier names P-256. Require the canonical P-256 encoding used by X.
+    guard key.derRepresentation.elementsEqual(bytes) else {
+        throw XChatError.invalidInput("Invalid P-256 SubjectPublicKeyInfo")
+    }
+    return key
 }
 
-/// Whether `bytes` encode a valid P-256 point in either SEC1 form.
+/// Whether `bytes` encode a valid P-256 public key.
 func isValidPublicKey(_ bytes: [UInt8]) -> Bool {
     (try? parsePublicKey(bytes)) != nil
 }
@@ -125,16 +131,10 @@ func verify(publicKey: [UInt8], signature: [UInt8], payload: [UInt8]) throws -> 
     guard signature.count == 64 else {
         throw XChatError.verification("Invalid signature length")
     }
+    let publicPoint = try parsePublicKey(publicKey)
     let key: P256.Signing.PublicKey
     do {
-        // Registration uploads SPKI DER, whose 65-byte point follows a
-        // 26-byte header; signed payloads name SEC1 points.
-        let rawKey = publicKey.count == 91 ? Array(publicKey[26...]) : publicKey
-        if rawKey.count == 33 {
-            key = try P256.Signing.PublicKey(compressedRepresentation: rawKey)
-        } else {
-            key = try P256.Signing.PublicKey(x963Representation: rawKey)
-        }
+        key = try P256.Signing.PublicKey(x963Representation: publicPoint.x963Representation)
     } catch {
         throw XChatError.invalidInput("Invalid public key: \(error)")
     }

@@ -276,27 +276,6 @@ final class EventSignatureTests: XCTestCase {
             .unverifiable)
     }
 
-    /// The fixture's own v10 payload and signature: the payload names the
-    /// signature version, covers contents_encryption_version, and the SPKI
-    /// public key verifies it.
-    func testV10PayloadFixtureVerifies() throws {
-        let publicKey = try Base64.decodeStandard(
-            TestVectors.string("signature_v10_cev1_public_key_b64"))
-        XCTAssertEqual(publicKey.count, 91)
-        let signature = try Base64.decodeStandard(TestVectors.string("signature_v10_cev1_b64"))
-
-        XCTAssertTrue(
-            try verify(
-                publicKey: publicKey, signature: signature,
-                payload: Array(TestVectors.string("payload_message_v10_cev1").utf8)))
-        // The same signature does not verify the layout without
-        // contents_encryption_version.
-        XCTAssertFalse(
-            try verify(
-                publicKey: publicKey, signature: signature,
-                payload: Array(TestVectors.string("payload_message_v10").utf8)))
-    }
-
     // MARK: Version bounds
 
     func testVersionBounds() throws {

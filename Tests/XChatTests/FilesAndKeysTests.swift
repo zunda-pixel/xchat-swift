@@ -313,7 +313,7 @@ final class FilesAndKeysTests: XCTestCase {
 
         // The loaded keys are the registration's keys in SEC1 form.
         let identitySEC1 = try core.identityPublicKey()
-        XCTAssertEqual(spkiDER(publicKey: identitySEC1), identitySPKI)
+        XCTAssertEqual(try spkiDER(publicKey: identitySEC1), identitySPKI)
         let publicKeys = try core.getPublicKeys()
         XCTAssertEqual(
             try Base64.decodeStandard(publicKeys.identity), identitySEC1)

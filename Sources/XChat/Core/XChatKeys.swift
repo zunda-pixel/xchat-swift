@@ -10,18 +10,19 @@ extension XChatCore {
     public func generateKeypairs() throws -> PublicKeyRegistrationPayload {
         let identity = generateKeyPair()
         let signing = generateKeyPair()
-        identityPrivateKey = identity.privateKey
-        signingPrivateKey = signing.privateKey
-        keyVersion = nil
 
-        let identitySPKI = spkiDER(publicKey: identity.publicKey)
-        let signingSPKI = spkiDER(publicKey: signing.publicKey)
+        let identitySPKI = try spkiDER(publicKey: identity.publicKey)
+        let signingSPKI = try spkiDER(publicKey: signing.publicKey)
         // The signing key endorses the identity key, and the identity key
         // endorses the signing key: the two-way binding registration stores.
         let identitySignature = try sign(
             privateKey: signing.privateKey, payload: identitySPKI)
         let signingSignature = try sign(
             privateKey: identity.privateKey, payload: signingSPKI)
+
+        identityPrivateKey = identity.privateKey
+        signingPrivateKey = signing.privateKey
+        keyVersion = nil
 
         return PublicKeyRegistrationPayload(
             publicKey: PublicKeyRegistration(
@@ -55,7 +56,7 @@ extension XChatCore {
             throw XChatError.invalidState("keys are not loaded: import keys first")
         }
         let publicKey = try derivePublicKey(privateKey: identityPrivateKey)
-        return fingerprint(spki: spkiDER(publicKey: publicKey))
+        return fingerprint(spki: try spkiDER(publicKey: publicKey))
     }
 
     /// Sets the version the loaded keys were registered under, which signs
