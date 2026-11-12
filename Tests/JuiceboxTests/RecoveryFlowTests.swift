@@ -12,11 +12,10 @@ final class RecoveryFlowTests: XCTestCase {
         repeating: 0, count: 43)
     private static let threshold = 2
     private static let realmCount = 3
-    private static let signer = Curve25519.Signing.PrivateKey()
 
     // MARK: Fake network
 
-    struct FakeRealm: Sendable {
+    struct FakeRealm {
         let id: [UInt8]
         let url: String
         let token: String
@@ -185,6 +184,7 @@ final class RecoveryFlowTests: XCTestCase {
             Self.userSecret, key: encryptionKey)!
 
         var realms: [FakeRealm] = []
+        let signer = Curve25519.Signing.PrivateKey()
         for index in 0..<Self.realmCount {
             let id = realmIds[index]
             let commitment = JuiceboxKeys.encryptedUserSecretCommitment(
@@ -196,7 +196,7 @@ final class RecoveryFlowTests: XCTestCase {
                 oprfShare: oprfShares[index].secret, scalarShare: scalarShares[index].secret,
                 encryptedSecret: encryptedSecret, secretCommitment: commitment,
                 unlockKeyCommitment: unlockKeyCommitment, unlockKey: unlockKey,
-                signingKey: Self.signer, numGuesses: 5, guessCount: 1))
+                signingKey: signer, numGuesses: 5, guessCount: 1))
         }
 
         let json = """

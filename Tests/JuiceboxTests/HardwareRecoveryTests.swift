@@ -10,7 +10,6 @@ final class HardwareRecoveryTests: XCTestCase {
     private static let pin = Array("13579".utf8)
     private static let secret = Array("two hardware realms".utf8) + [UInt8](
         repeating: 0, count: 44)
-    private static let signer = Curve25519.Signing.PrivateKey()
 
     // MARK: Server-side Noise
 
@@ -131,7 +130,7 @@ final class HardwareRecoveryTests: XCTestCase {
 
     // MARK: Fake realms
 
-    private struct RealmFixture: Sendable {
+    private struct RealmFixture {
         let id: [UInt8]
         let address: String
         let token: String
@@ -148,11 +147,13 @@ final class HardwareRecoveryTests: XCTestCase {
 
     private final class FakeNetwork: JuiceboxHTTPTransport, @unchecked Sendable {
         let realms: [String: RealmFixture]
+        let signer: Curve25519.Signing.PrivateKey
         var sessions: [UInt32: ServerTransport] = [:]
 
         init(realms: [RealmFixture]) {
             self.realms = Dictionary(
                 uniqueKeysWithValues: realms.map { ($0.address + "req", $0) })
+            self.signer = Curve25519.Signing.PrivateKey()
         }
 
         func send(_ request: JuiceboxHTTPRequest) async throws -> JuiceboxHTTPResponse {
@@ -273,7 +274,7 @@ final class HardwareRecoveryTests: XCTestCase {
             message += realm.id
             message += be16(32)
             message += publicKey
-            let signature = try HardwareRecoveryTests.signer.signature(for: message)
+            let signature = try signer.signature(for: message)
 
             return encodeCBOR(.map([
                 CBORPair(key: .text("Recover2"), value: .map([
@@ -282,8 +283,7 @@ final class HardwareRecoveryTests: XCTestCase {
                             CBORPair(key: .text("public_key"), value: .bytes(publicKey)),
                             CBORPair(
                                 key: .text("verifying_key"),
-                                value: .bytes(
-                                    Array(HardwareRecoveryTests.signer.publicKey.rawRepresentation))),
+                                value: .bytes(Array(signer.publicKey.rawRepresentation))),
                             CBORPair(key: .text("signature"), value: .bytes(Array(signature))),
                         ])),
                         CBORPair(
