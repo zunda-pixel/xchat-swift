@@ -38,30 +38,6 @@ func hkdfWithInfo(secret: [UInt8], salt: String, info: [UInt8], length: Int) thr
     return unsafe derived.withUnsafeBytes { unsafe Array($0) }
 }
 
-/// X9.63 key derivation (KDF2) with SHA-256: each round hashes
-/// `sharedSecret || counter (4-byte big-endian) || sharedInfo`, concatenated
-/// and truncated to `length`. ECIES derives its AES key and IV with it.
-func kdf2SHA256(sharedSecret: [UInt8], sharedInfo: [UInt8], length: Int) -> [UInt8] {
-    let iterations = (length + 31) / 32
-    var output: [UInt8] = []
-    output.reserveCapacity(iterations * 32)
-    if iterations > 0 {
-        for counter in 1...iterations {
-            var input = sharedSecret
-            let value = UInt32(counter)
-            input += [
-                UInt8(truncatingIfNeeded: value >> 24),
-                UInt8(truncatingIfNeeded: value >> 16),
-                UInt8(truncatingIfNeeded: value >> 8),
-                UInt8(truncatingIfNeeded: value),
-            ]
-            input += sharedInfo
-            output += sha256(input)
-        }
-    }
-    return Array(output.prefix(length))
-}
-
 /// Cryptographically secure random bytes, from the system random source.
 func randomBytes(_ length: Int) -> [UInt8] {
     var bytes = [UInt8](repeating: 0, count: length)

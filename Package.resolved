@@ -1,6 +1,23 @@
 {
-  "originHash" : "4be740355c6d444cbbde76217249466e18181ef1cfd304bcb41b375ca74c259a",
+  "originHash" : "62f6045db37ec25a4de0c0fc4da7949b0c297008987a205b3d978d493bf77ca8",
   "pins" : [
+    {
+      "identity" : "blake-hash",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/trancee/blake-hash.git",
+      "state" : {
+        "revision" : "30148ebb247ecf41535a91775ccff153bb9100f9",
+        "version" : "1.1.1"
+      }
+    },
+    {
+      "identity" : "phc-winner-argon2",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/P-H-C/phc-winner-argon2.git",
+      "state" : {
+        "revision" : "f57e61e19229e23c4445b85494dbf7c07de721cb"
+      }
+    },
     {
       "identity" : "swift-algorithms",
       "kind" : "remoteSourceControl",
@@ -33,8 +50,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-crypto.git",
       "state" : {
-        "revision" : "95ba0316a9b733e92bb6b071255ff46263bbe7dc",
-        "version" : "3.15.1"
+        "revision" : "f8fad2f95ad67b45f6340c0960e2396094d67e07",
+        "version" : "5.1.1"
       }
     },
     {
@@ -44,6 +61,15 @@
       "state" : {
         "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
         "version" : "1.1.1"
+      }
+    },
+    {
+      "identity" : "swift-sodium",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jedisct1/swift-sodium.git",
+      "state" : {
+        "revision" : "cfd195c76882aa9b997560ca7cb95d72fbf5db00",
+        "version" : "0.11.0"
       }
     }
   ],

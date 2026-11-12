@@ -289,7 +289,7 @@ final class FileCryptoTests: XCTestCase {
             assertThrows(
                 "Conversation key must be 32 bytes", kind: .invalidInput
             ) {
-                try FileEncryptor(key: key)
+                _ = try FileEncryptor(key: key)
             }
             assertThrows(
                 "Conversation key must be 32 bytes", kind: .invalidInput

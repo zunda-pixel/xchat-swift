@@ -46,8 +46,9 @@ public func encryptedFileSize(_ plaintextSize: UInt64) -> UInt64? {
 /// carry the message tag and the last chunk carries the final tag, so
 /// framing is identical regardless of how the input is split across `push`
 /// calls. Empty input (no non-empty `push`) produces only the 24-byte
-/// header.
-public struct FileEncryptor {
+/// header. Copying an encryptor would reuse its stream nonce for the next
+/// frame, so each encryptor has one owner.
+public struct FileEncryptor: ~Copyable {
     /// Underlying secretstream pusher.
     private var stream: SecretStreamPush
     /// Header bytes, emitted ahead of the first frame.
@@ -56,7 +57,7 @@ public struct FileEncryptor {
     private var buf: [UInt8]
     /// Whether any non-empty plaintext has been pushed.
     private var started: Bool
-    /// Set by `finish`, which consumes the encryptor in the reference API.
+    /// Set after emitting the last frame.
     private var finished: Bool
 
     /// Creates an encryptor for one file under a 32-byte conversation key.
@@ -87,14 +88,14 @@ public struct FileEncryptor {
         }
         var offset = 0
         while buf.count - offset > decryptedChunkSize {
-            out += stream.push(Array(buf[offset..<offset + decryptedChunkSize]), tag: .message)
+            out += try stream.push(Array(buf[offset..<offset + decryptedChunkSize]), tag: .message)
             offset += decryptedChunkSize
         }
         buf.removeFirst(offset)
         return out
     }
 
-    /// Emits the final frame and consumes the encryptor.
+    /// Emits the final frame and marks the encryptor as finished.
     public mutating func finish() throws -> [UInt8] {
         guard !finished else {
             throw XChatError.invalidInput("File encryptor already finished")
@@ -103,7 +104,7 @@ public struct FileEncryptor {
         var out = prefix
         prefix = []
         if started {
-            out += stream.push(buf, tag: .final)
+            out += try stream.push(buf, tag: .final)
             buf = []
         }
         return out
