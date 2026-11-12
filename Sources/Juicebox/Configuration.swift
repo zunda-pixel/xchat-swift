@@ -65,8 +65,10 @@ public struct JuiceboxConfiguration: Sendable, Equatable {
                 let address = raw["address"] as? String, !address.isEmpty
             else { throw JuiceboxConfigurationError.invalid }
             var publicKey: [UInt8]?
-            if let key = raw["public_key"] as? String {
-                guard let parsed = hexBytes(key), parsed.count == 32 else {
+            if let value = raw["public_key"], !(value is NSNull) {
+                guard let key = value as? String,
+                    let parsed = hexBytes(key), parsed.count == 32
+                else {
                     throw JuiceboxConfigurationError.invalid
                 }
                 publicKey = parsed

@@ -13,8 +13,8 @@ final class PipelineTests: XCTestCase {
             publicKey: TestVectors.string("signing_public_b64"))
     }
 
-    private func makeCore() throws -> XChatCore {
-        let core = XChatCore()
+    private func makeCore(rejectUnverified: Bool = true) throws -> XChatCore {
+        let core = XChatCore(rejectUnverified: rejectUnverified)
         try core.importKeys(
             identityPrivateKey: TestVectors.bytes("identity_private_b64"),
             signingPrivateKey: TestVectors.bytes("signing_private_b64"),
@@ -153,6 +153,59 @@ final class PipelineTests: XCTestCase {
         let message = try message(result.events[1].event)
         XCTAssertEqual(message.text, TestVectors.string("event_message_text"))
         XCTAssertTrue(message.verified)
+    }
+
+    func testBatchAdoptsOnlyTheKeyFromTheVerifiedEvent() throws {
+        let core = try makeCore()
+        let encoded = TestVectors.string("event_key_change_b64")
+        let signing = signingKey(userId: TestVectors.string("event_sender_id"))
+        var unsigned = try core.parseEvent(encoded)
+        unsigned.messageEventSignature = nil
+        guard case .conversationKeyChange(var change)? = unsigned.detail else {
+            return XCTFail("expected key change")
+        }
+        var participants = try XCTUnwrap(change.conversationParticipantKeys)
+        guard participants.count == 1 else { return XCTFail("expected one participant") }
+        participants[0].encryptedConversationKey = Base64.encodeStandard(
+            try encryptWithPublicKey(
+                publicKey: TestVectors.bytes("identity_public_b64"),
+                data: [UInt8](repeating: 42, count: 32)))
+        change.conversationParticipantKeys = participants
+        unsigned.detail = .conversationKeyChange(change)
+        let unsignedEvent = encodeEvent(unsigned)
+
+        let rejected = core.decryptEvents([unsignedEvent], signingKeys: [signing])
+        XCTAssertTrue(rejected.conversationKeys.keys.isEmpty)
+        XCTAssertNotNil(rejected.errors[0])
+        let inspection = try makeCore(rejectUnverified: false)
+            .decryptEvents([unsignedEvent], signingKeys: [signing])
+        XCTAssertEqual(inspection.events.count, 1)
+        XCTAssertTrue(inspection.conversationKeys.keys.isEmpty)
+
+        for keyEvents in [[encoded, unsignedEvent], [unsignedEvent, encoded]] {
+            let result = core.decryptEvents(
+                keyEvents + [TestVectors.string("event_message_b64")], signingKeys: [signing])
+            XCTAssertEqual(result.errors.count, 1)
+            XCTAssertNotNil(result.errors[try XCTUnwrap(keyEvents.firstIndex(of: unsignedEvent))])
+            XCTAssertEqual(result.conversationKeys.keys["1001"], TestVectors.bytes("conversation_key_b64"))
+            let decrypted = try message(XCTUnwrap(result.events.last).event)
+            XCTAssertEqual(decrypted.text, TestVectors.string("event_message_text"))
+        }
+    }
+
+    func testKeyChangeCanVerifyWithAnExplicitKey() throws {
+        let core = XChatCore()
+        let encoded = TestVectors.string("event_key_change_b64")
+        let keys = ["1001": TestVectors.bytes("conversation_key_b64")]
+        let signing = signingKey(userId: TestVectors.string("event_sender_id"))
+        let event = try core.decryptEvent(encoded, conversationKeys: keys, signingKeys: [signing])
+        guard case .keyChange(let change) = event else { return XCTFail("expected key change") }
+        XCTAssertTrue(change.verified)
+
+        let batch = core.decryptEvents([encoded], conversationKeys: keys, signingKeys: [signing])
+        XCTAssertTrue(batch.errors.isEmpty)
+        XCTAssertEqual(batch.conversationKeys.keys, keys)
+        XCTAssertNil(batch.conversationKeys.latestVersion)
     }
 
     /// An older, validly signed key change cannot lower the reported latest

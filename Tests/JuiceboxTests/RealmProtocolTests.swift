@@ -163,6 +163,17 @@ final class RealmProtocolTests: XCTestCase {
         XCTAssertThrowsError(try JuiceboxConfiguration.parse(Array(json.utf8)))
     }
 
+    func testConfigurationDistinguishesNullPublicKeyFromAnInvalidType() throws {
+        let key = #""0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20""#
+        for value in ["42", "[]", "{}", "false"] {
+            let json = Self.configurationJSON.replacingOccurrences(of: key, with: value)
+            XCTAssertThrowsError(try JuiceboxConfiguration.parse(Array(json.utf8)))
+        }
+        let json = Self.configurationJSON.replacingOccurrences(of: key, with: "null")
+        let configuration = try JuiceboxConfiguration.parse(Array(json.utf8))
+        XCTAssertNil(configuration.realms[0].publicKey)
+    }
+
     // MARK: Messages
 
     func testSecretsRequestEncoding() {

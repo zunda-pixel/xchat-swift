@@ -1,4 +1,5 @@
 import Crypto
+import Foundation
 import XCTest
 
 @testable import Juicebox
@@ -215,6 +216,39 @@ final class RecoveryFlowTests: XCTestCase {
         return (FakeNetwork(realms: realms), configuration, tokens)
     }
 
+    private actor CancellingTransport: JuiceboxHTTPTransport {
+        enum Mode: CaseIterable {
+            case throwsCancellation
+            case throwsURLCancellation
+            case returnsAfterCancellation
+        }
+
+        let network: FakeNetwork
+        let mode: Mode
+        private(set) var pinRequests = 0
+
+        init(network: FakeNetwork, mode: Mode) {
+            self.network = network
+            self.mode = mode
+        }
+
+        func send(_ request: JuiceboxHTTPRequest) async throws -> JuiceboxHTTPResponse {
+            if try decodeCBOR(request.body) == .text("Recover1") {
+                return try await network.send(request)
+            }
+            pinRequests += 1
+            switch mode {
+            case .throwsCancellation:
+                throw CancellationError()
+            case .throwsURLCancellation:
+                throw URLError(.cancelled)
+            case .returnsAfterCancellation:
+                unsafe withUnsafeCurrentTask { unsafe $0?.cancel() }
+                return try await network.send(request)
+            }
+        }
+    }
+
     // MARK: Tests
 
     func testRecoverUserSecret() async throws {
@@ -222,6 +256,24 @@ final class RecoveryFlowTests: XCTestCase {
         let recovery = JuiceboxRecovery(configuration: configuration, tokens: tokens)
         let secret = try await recovery.recover(pin: Self.pin, transport: network)
         XCTAssertEqual(secret, Self.userSecret)
+    }
+
+    func testCancellationStopsBeforeTheNextPINRequest() async throws {
+        let (network, configuration, tokens) = try makeNetwork()
+        let recovery = JuiceboxRecovery(configuration: configuration, tokens: tokens)
+        for mode in CancellingTransport.Mode.allCases {
+            let transport = CancellingTransport(network: network, mode: mode)
+            let task = Task { [pin = Self.pin] in
+                try await recovery.recover(pin: pin, transport: transport)
+            }
+            do {
+                _ = try await task.value
+                XCTFail("expected cancellation")
+            } catch is CancellationError {
+                let requests = await transport.pinRequests
+                XCTAssertEqual(requests, 1)
+            }
+        }
     }
 
     func testRecoverWithOneRealmDown() async throws {

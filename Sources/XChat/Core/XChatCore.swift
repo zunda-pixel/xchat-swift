@@ -90,7 +90,8 @@ public final class XChatCore {
     /// Decrypts one event. Throws when the event is malformed, when its
     /// signature is missing or invalid under the reject-unverified policy,
     /// when its conversation key was not supplied, or when its contents do
-    /// not decrypt.
+    /// not decrypt. For key-change verification, a caller-supplied key can
+    /// be used when this device cannot decrypt a key from the event.
     public func decryptEvent(
         _ eventB64: String,
         conversationKeys: [String: [UInt8]] = [:],
@@ -108,7 +109,8 @@ public final class XChatCore {
     /// Decrypts a batch of events in one pass.
     ///
     /// Conversation keys carried by `ConversationKeyChange` events are
-    /// adopted (using the loaded identity key) and returned for caching.
+    /// returned for caching only after verifying each event against its
+    /// own decrypted key. This applies even when inspecting unverified events.
     /// Per-event failures — malformed events, failed verification, missing
     /// keys — are collected in `errors` by index instead of throwing, so one
     /// bad event never hides the rest. Caller-supplied `conversationKeys`
@@ -130,66 +132,53 @@ public final class XChatCore {
         }
 
         var keys: [String: [UInt8]] = [:]
-        for event in parsed {
-            guard let event = try? event.get(),
-                case .conversationKeyChange(let change)? = event.detail,
-                let key = decryptKeyChangeCkey(change)
-            else { continue }
-            keys[change.conversationKeyVersion ?? ""] = key
-        }
-
-        // A key change at or after the enforcement threshold whose signature
-        // version can be verified must verify, or its key is not adopted.
-        for event in parsed {
-            guard let event = try? event.get(),
-                case .conversationKeyChange(let change)? = event.detail,
-                let sequence = event.sequenceId.flatMap({ Int64($0) }),
-                sequence >= conversationKeySignatureEnforcementSequence,
-                let version = signatureVersion(of: event),
-                version >= conversationKeyPlaintextSignatureVersion,
-                let key = keys[change.conversationKeyVersion ?? ""]
-            else { continue }
-            let senderKeys = verifiedKeys.filter { $0.userId == event.senderId }
-            let check = checkEventSignature(
-                event: event, detail: .conversationKeyChange(change),
-                signingKeys: signatureKeys(senderKeys),
-                plaintextConversationKeyB64: Base64.encodeStandard(key))
-            if check != .verified {
-                keys.removeValue(forKey: change.conversationKeyVersion ?? "")
+        var conflictingVersions: Set<String> = []
+        var keyChanges: [Int: KeyChange] = [:]
+        var verifiedKeyIndices: [Int] = []
+        var errors: [Int: String] = [:]
+        var batchConversations: Set<String> = []
+        for (index, result) in parsed.enumerated() {
+            guard let event = try? result.get() else { continue }
+            if let conversationId = event.conversationId {
+                batchConversations.insert(conversationId)
             }
-        }
+            guard case .conversationKeyChange(let change)? = event.detail else { continue }
+            let key = decryptKeyChangeCkey(change)
+            let verificationKey = key ?? change.conversationKeyVersion.flatMap { conversationKeys[$0] }
+            do {
+                let keyChange = try decryptKeyChangeEvent(
+                    event, change, plaintextKey: verificationKey,
+                    signingKeys: verifiedKeys.filter { $0.userId == event.senderId })
+                keyChanges[index] = keyChange
+                guard keyChange.verified, let key, let version = change.conversationKeyVersion,
+                    !conflictingVersions.contains(version)
+                else { continue }
 
-        // Only a verified key change raises the reported latest version, and
-        // a replayed older one cannot lower it.
-        var batchConversations: [String] = []
-        for event in parsed {
-            guard let event = try? event.get() else { continue }
-            if let conversationId = event.conversationId,
-                !batchConversations.contains(conversationId)
-            {
-                batchConversations.append(conversationId)
-            }
-            guard case .conversationKeyChange(let change)? = event.detail,
-                let conversationId = event.conversationId,
-                let versionString = change.conversationKeyVersion,
-                let versionNumber = UInt64(versionString),
-                signatureVersion(of: event).map({ $0 >= conversationKeyPlaintextSignatureVersion })
-                    == true,
-                let key = keys[versionString]
-            else { continue }
-            let senderKeys = verifiedKeys.filter { $0.userId == event.senderId }
-            if checkEventSignature(
-                event: event, detail: .conversationKeyChange(change),
-                signingKeys: signatureKeys(senderKeys),
-                plaintextConversationKeyB64: Base64.encodeStandard(key)) == .verified
-            {
-                keyHighWater[conversationId] = max(
-                    keyHighWater[conversationId] ?? 0, versionNumber)
-                if let version = signatureVersion(of: event) {
-                    keyChangeSignatureFloors[conversationId] = max(
-                        keyChangeSignatureFloors[conversationId] ?? 0, version)
+                verifiedKeyIndices.append(index)
+
+                // The cache is keyed by version alone, so conflicting signed keys
+                // cannot be selected without a caller-supplied key.
+                if let previous = keys[version], previous != key {
+                    keys.removeValue(forKey: version)
+                    conflictingVersions.insert(version)
+                } else {
+                    keys[version] = key
                 }
+            } catch {
+                errors[index] = reason(of: error)
             }
+        }
+
+        // Only an adopted key covered by a plaintext signature raises the
+        // reported latest version. Replaying an older one cannot lower it.
+        for index in verifiedKeyIndices {
+            guard let change = keyChanges[index], let event = try? parsed[index].get(),
+                let conversationId = event.conversationId,
+                let version = UInt64(change.conversationKeyVersion),
+                keys[change.conversationKeyVersion] != nil,
+                signatureVersion(of: event).map({ $0 >= conversationKeyPlaintextSignatureVersion }) == true
+            else { continue }
+            keyHighWater[conversationId] = max(keyHighWater[conversationId] ?? 0, version)
         }
 
         // The caller's map wins over adopted keys.
@@ -198,8 +187,12 @@ public final class XChatCore {
         }
 
         var decrypted: [DecryptedEvent] = []
-        var errors: [Int: String] = [:]
         for (index, eventB64) in events.enumerated() {
+            if let change = keyChanges[index] {
+                decrypted.append(DecryptedEvent(event: .keyChange(change), originalB64: eventB64))
+                continue
+            }
+            guard errors[index] == nil else { continue }
             do {
                 let event = try parsed[index].get()
                 let senderKeys = verifiedKeys.filter { $0.userId == event.senderId }
@@ -230,12 +223,7 @@ public final class XChatCore {
         signingKeys: [SigningKeyEntry],
         allSigningKeys: [SigningKeyEntry]
     ) throws -> XChatEvent {
-        let meta = EventMeta(
-            sequenceId: parsed.sequenceId,
-            messageId: parsed.messageId,
-            senderId: parsed.senderId,
-            conversationId: parsed.conversationId,
-            createdAtMilliseconds: parsed.createdAtMilliseconds.flatMap { Int64($0) })
+        let meta = eventMeta(parsed)
 
         guard let detail = parsed.detail else {
             return .unsupported(UnsupportedEvent(meta: meta, verified: false))
@@ -246,8 +234,9 @@ public final class XChatCore {
                 parsed, create, meta: meta, keys: keys, signingKeys: signingKeys,
                 allSigningKeys: allSigningKeys)
         case .conversationKeyChange(let change):
-            return try decryptKeyChangeEvent(
-                parsed, change, meta: meta, keys: keys, signingKeys: signingKeys)
+            let key = decryptKeyChangeCkey(change) ?? change.conversationKeyVersion.flatMap { keys[$0] }
+            return .keyChange(try decryptKeyChangeEvent(
+                parsed, change, plaintextKey: key, signingKeys: signingKeys))
         case .messageTyping(let typing):
             return .typing(
                 Typing(
@@ -335,21 +324,14 @@ public final class XChatCore {
     private func decryptKeyChangeEvent(
         _ parsed: MessageEvent,
         _ change: ConversationKeyChangeEvent,
-        meta: EventMeta,
-        keys: [String: [UInt8]],
+        plaintextKey: [UInt8]?,
         signingKeys: [SigningKeyEntry]
-    ) throws -> XChatEvent {
+    ) throws -> KeyChange {
         let version = change.conversationKeyVersion ?? ""
-        let plaintextKeyB64: String?
-        if let key = keys[version] {
-            plaintextKeyB64 = Base64.encodeStandard(key)
-        } else {
-            plaintextKeyB64 = decryptKeyChangeCkey(change).map(Base64.encodeStandard)
-        }
         let check = checkEventSignature(
             event: parsed, detail: .conversationKeyChange(change),
             signingKeys: signatureKeys(signingKeys),
-            plaintextConversationKeyB64: plaintextKeyB64)
+            plaintextConversationKeyB64: plaintextKey.map(Base64.encodeStandard))
         try enforceVerification(check, label: "KeyChange")
         if check == .verified, let conversationId = parsed.conversationId,
             let version = signatureVersion(of: parsed)
@@ -367,10 +349,9 @@ public final class XChatCore {
                 userId: userId, encryptedConversationKey: encrypted,
                 publicKeyVersion: key.publicKeyVersion ?? "")
         }
-        return .keyChange(
-            KeyChange(
-                meta: meta, conversationKeyVersion: version,
-                verified: check == .verified, participantKeys: participants))
+        return KeyChange(
+            meta: eventMeta(parsed), conversationKeyVersion: version,
+            verified: check == .verified, participantKeys: participants)
     }
 
     // MARK: Key handling
@@ -474,9 +455,12 @@ private func signatureKeys(_ entries: [SigningKeyEntry]) -> [SigningKey] {
     entries.map { SigningKey(publicKeyVersion: $0.publicKeyVersion, publicKey: $0.publicKey) }
 }
 
-/// The sequence at or after which a key change's signature is enforced. It
-/// sits above the fixture traffic so legacy history keeps decrypting.
-private let conversationKeySignatureEnforcementSequence: Int64 = 2_070_276_095_283_454_002
+private func eventMeta(_ event: MessageEvent) -> EventMeta {
+    EventMeta(
+        sequenceId: event.sequenceId, messageId: event.messageId, senderId: event.senderId,
+        conversationId: event.conversationId,
+        createdAtMilliseconds: event.createdAtMilliseconds.flatMap(Int64.init))
+}
 
 private func reason(of error: some Error) -> String {
     (error as? XChatError)?.message ?? String(describing: error)

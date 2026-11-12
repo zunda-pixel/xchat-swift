@@ -1,4 +1,5 @@
 import Crypto
+import Foundation
 import _Clibsodium
 
 /// A request the recovery driver asks the host app to perform. The SDK owns
@@ -93,6 +94,7 @@ public struct JuiceboxRecovery: Sendable {
     public func recover(
         pin: [UInt8], transport: any JuiceboxHTTPTransport
     ) async throws -> [UInt8] {
+        try Task.checkCancellation()
         guard sodium_init() >= 0 else { throw JuiceboxRecoveryError.assertion }
         let threshold = configuration.recoverThreshold
 
@@ -112,7 +114,10 @@ public struct JuiceboxRecovery: Sendable {
                 case .notRegistered: errors.append(.notRegistered)
                 case .noGuesses: errors.append(.invalidPin(guessesRemaining: 0))
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                try Task.checkCancellation()
                 errors.append(recoveryError(from: error))
             }
         }
@@ -169,7 +174,10 @@ public struct JuiceboxRecovery: Sendable {
                 case .notRegistered: errors.append(.notRegistered)
                 case .noGuesses: errors.append(.invalidPin(guessesRemaining: 0))
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                try Task.checkCancellation()
                 errors.append(recoveryError(from: error))
             }
         }
@@ -231,7 +239,10 @@ public struct JuiceboxRecovery: Sendable {
                     errors.append(.invalidPin(guessesRemaining: Int(guesses)))
                 case .noGuesses: errors.append(.invalidPin(guessesRemaining: 0))
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                try Task.checkCancellation()
                 errors.append(recoveryError(from: error))
             }
         }
@@ -254,6 +265,7 @@ public struct JuiceboxRecovery: Sendable {
         guard let secret = JuiceboxKeys.decryptUserSecret(
             secretGroup.key, key: encryptionKey)
         else { throw JuiceboxRecoveryError.assertion }
+        try Task.checkCancellation()
         return secret
     }
 
@@ -385,11 +397,20 @@ public struct JuiceboxRecovery: Sendable {
     private func send(
         _ request: JuiceboxHTTPRequest, transport: any JuiceboxHTTPTransport
     ) async throws -> JuiceboxHTTPResponse {
+        try Task.checkCancellation()
+        let response: JuiceboxHTTPResponse
         do {
-            return try await transport.send(request)
+            response = try await transport.send(request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch {
+            try Task.checkCancellation()
             throw JuiceboxRecoveryError.transient
         }
+        try Task.checkCancellation()
+        return response
     }
 
     private func unpackPadded(_ payload: [UInt8]) throws -> SecretsResponse {
