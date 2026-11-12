@@ -1,6 +1,6 @@
 import Crypto
 
-struct AES128GCM: Sendable {
+struct AES128GCM {
     private let key: SymmetricKey
 
     init(key: [UInt8]) {
