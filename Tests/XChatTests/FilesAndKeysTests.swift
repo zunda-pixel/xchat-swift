@@ -129,7 +129,8 @@ final class FilesAndKeysTests: XCTestCase {
       let message = (error as? XChatError)?.message ?? ""
       XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
       XCTAssertTrue(
-        message.hasPrefix("media_hash_key 'not-a-hash' is not in the message, whose media hash keys are "),
+        message.hasPrefix(
+          "media_hash_key 'not-a-hash' is not in the message, whose media hash keys are "),
         message)
       XCTAssertTrue(message.contains(TestVectors.string("media_first_hash_key")), message)
     }
@@ -221,7 +222,8 @@ final class FilesAndKeysTests: XCTestCase {
     ) { error in
       let message = (error as? XChatError)?.message ?? ""
       XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
-      XCTAssertTrue(message.hasPrefix("media_hash_key 'nope' is not one of the message's files"), message)
+      XCTAssertTrue(
+        message.hasPrefix("media_hash_key 'nope' is not one of the message's files"), message)
     }
   }
 

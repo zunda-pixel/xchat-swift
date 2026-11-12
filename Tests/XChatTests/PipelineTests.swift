@@ -189,7 +189,8 @@ final class PipelineTests: XCTestCase {
         keyEvents + [TestVectors.string("event_message_b64")], signingKeys: [signing])
       XCTAssertEqual(result.errors.count, 1)
       XCTAssertNotNil(result.errors[try XCTUnwrap(keyEvents.firstIndex(of: unsignedEvent))])
-      XCTAssertEqual(result.conversationKeys.keys["1001"], TestVectors.bytes("conversation_key_b64"))
+      XCTAssertEqual(
+        result.conversationKeys.keys["1001"], TestVectors.bytes("conversation_key_b64"))
       let decrypted = try message(XCTUnwrap(result.events.last).event)
       XCTAssertEqual(decrypted.text, TestVectors.string("event_message_text"))
     }

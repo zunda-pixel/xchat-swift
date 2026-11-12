@@ -73,23 +73,27 @@ final class SecretBoxTests: XCTestCase {
     var ct = Array(Self.ciphertext[16...])
     ct[0] ^= 0xaa
     XCTAssertThrowsError(
-      try cipher.decryptDetached(nonce: Self.nonce, ciphertext: ct, tag: Array(Self.ciphertext[0..<16])))
+      try cipher.decryptDetached(
+        nonce: Self.nonce, ciphertext: ct, tag: Array(Self.ciphertext[0..<16])))
 
     var tag = Array(Self.ciphertext[0..<16])
     tag[15] ^= 1
     XCTAssertThrowsError(
-      try cipher.decryptDetached(nonce: Self.nonce, ciphertext: Array(Self.ciphertext[16...]), tag: tag))
+      try cipher.decryptDetached(
+        nonce: Self.nonce, ciphertext: Array(Self.ciphertext[16...]), tag: tag))
 
     var nonce = Self.nonce
     nonce[0] ^= 1
     XCTAssertThrowsError(
       try cipher.decryptDetached(
-        nonce: nonce, ciphertext: Array(Self.ciphertext[16...]), tag: Array(Self.ciphertext[0..<16])))
+        nonce: nonce, ciphertext: Array(Self.ciphertext[16...]), tag: Array(Self.ciphertext[0..<16])
+      ))
 
     // A wrong-length tag is rejected without touching the ciphertext.
     XCTAssertThrowsError(
       try cipher.decryptDetached(
-        nonce: Self.nonce, ciphertext: Array(Self.ciphertext[16...]), tag: Array(Self.ciphertext[0..<15])))
+        nonce: Self.nonce, ciphertext: Array(Self.ciphertext[16...]),
+        tag: Array(Self.ciphertext[0..<15])))
   }
 
   func testEmptyPlaintext() throws {
@@ -175,7 +179,8 @@ final class SecretBoxTests: XCTestCase {
     let shortKey = [UInt8](repeating: 1, count: 16)
     let longKey = [UInt8](repeating: 1, count: 33)
     let message = Array("hi".utf8)
-    let box = try! encryptMessage(key: (0..<32).map { _ in UInt8.random(in: 0...255) }, plaintext: message)
+    let box = try! encryptMessage(
+      key: (0..<32).map { _ in UInt8.random(in: 0...255) }, plaintext: message)
 
     for key in [shortKey, longKey] {
       XCTAssertThrowsError(try encryptMessage(key: key, plaintext: message)) { error in
