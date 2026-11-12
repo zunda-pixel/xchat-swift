@@ -378,16 +378,21 @@ public final class XChatCore {
   /// key that claims a binding it does not have cannot verify events.
   private func verifiedSigningKeys(_ entries: [SigningKeyEntry]) -> [SigningKeyEntry] {
     entries.filter { entry in
+      if entry.identityPublicKey == nil, entry.identityPublicKeySignature == nil,
+        entry.signingPublicKeySignature == nil
+      {
+        return true
+      }
       guard let identityB64 = entry.identityPublicKey,
-        let signatureB64 = entry.identityPublicKeySignature
-      else { return true }
-      guard let identity = try? Base64.decodeStandard(identityB64),
+        let signatureB64 = entry.signingPublicKeySignature,
+        let identity = try? Base64.decodeStandard(identityB64),
         let signature = try? Base64.decodeStandard(signatureB64),
-        let signingKey = try? Base64.decodeStandard(entry.publicKey)
+        let signingKey = try? Base64.decodeStandard(entry.publicKey),
+        let signingSPKI = try? spkiDER(publicKey: signingKey)
       else { return false }
       return
         (try? verify(
-          publicKey: signingKey, signature: signature, payload: identity)) ?? false
+          publicKey: identity, signature: signature, payload: signingSPKI)) ?? false
     }
   }
 
@@ -743,6 +748,9 @@ private func validateReplyPreview(
     if usesMessageKey(raw) {
       guard let editMessageId = editContents.messageId,
         editMessageId == raw.messageId
+      else { return .invalid }
+    } else {
+      guard let sequenceId = raw.sequenceId, editContents.messageSequenceId == sequenceId
       else { return .invalid }
     }
     edited = editContents

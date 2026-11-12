@@ -284,15 +284,19 @@ public struct SigningKeyEntry: Sendable, Equatable {
   public var identityPublicKey: String?
   /// Base64 signature of the identity key bytes by the signing key.
   public var identityPublicKeySignature: String?
+  /// Base64 signature of the signing key SPKI DER by the identity key.
+  public var signingPublicKeySignature: String?
 
   public init(
     userId: String, publicKeyVersion: String, publicKey: String,
-    identityPublicKey: String? = nil, identityPublicKeySignature: String? = nil
+    identityPublicKey: String? = nil, identityPublicKeySignature: String? = nil,
+    signingPublicKeySignature: String? = nil
   ) {
     self.userId = userId
     self.publicKeyVersion = publicKeyVersion
     self.publicKey = publicKey
     self.identityPublicKey = identityPublicKey
     self.identityPublicKeySignature = identityPublicKeySignature
+    self.signingPublicKeySignature = signingPublicKeySignature
   }
 }

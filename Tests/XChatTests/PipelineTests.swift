@@ -400,15 +400,17 @@ final class PipelineTests: XCTestCase {
     let identityB64 = TestVectors.string("identity_public_b64")
     let identityBytes = TestVectors.bytes("identity_public_b64")
     let signingPrivate = TestVectors.bytes("signing_private_b64")
+    let identityPrivate = TestVectors.bytes("identity_private_b64")
     let senderId = TestVectors.string("event_sender_id")
 
-    let goodSignature = try sign(privateKey: signingPrivate, payload: identityBytes)
+    let signingSPKI = try spkiDER(publicKey: TestVectors.bytes("signing_public_b64"))
+    let goodSignature = try sign(privateKey: identityPrivate, payload: signingSPKI)
     let boundKey = SigningKeyEntry(
       userId: senderId,
       publicKeyVersion: TestVectors.string("event_signing_key_version"),
       publicKey: TestVectors.string("signing_public_b64"),
       identityPublicKey: identityB64,
-      identityPublicKeySignature: Base64.encodeStandard(goodSignature))
+      signingPublicKeySignature: Base64.encodeStandard(goodSignature))
     let message = try message(
       XChatCore().decryptEvent(
         TestVectors.string("event_message_b64"),
@@ -416,21 +418,32 @@ final class PipelineTests: XCTestCase {
         signingKeys: [boundKey]))
     XCTAssertTrue(message.verified)
 
-    // A binding over the wrong bytes is invalid, so the key is dropped.
-    let badSignature = try sign(privateKey: signingPrivate, payload: [1, 2, 3])
-    let badKey = SigningKeyEntry(
-      userId: senderId,
-      publicKeyVersion: TestVectors.string("event_signing_key_version"),
-      publicKey: TestVectors.string("signing_public_b64"),
-      identityPublicKey: identityB64,
-      identityPublicKeySignature: Base64.encodeStandard(badSignature))
-    XCTAssertThrowsError(
-      try XChatCore().decryptEvent(
-        TestVectors.string("event_message_b64"),
-        conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
-        signingKeys: [badKey])
-    ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .verification)
+    // A signature made by the signing key itself cannot establish identity authorization.
+    let badSignature = try sign(privateKey: signingPrivate, payload: identityBytes)
+    let unauthorized = [
+      SigningKeyEntry(
+        userId: senderId,
+        publicKeyVersion: TestVectors.string("event_signing_key_version"),
+        publicKey: TestVectors.string("signing_public_b64"),
+        identityPublicKey: identityB64,
+        identityPublicKeySignature: Base64.encodeStandard(badSignature)),
+      SigningKeyEntry(
+        userId: senderId,
+        publicKeyVersion: TestVectors.string("event_signing_key_version"),
+        publicKey: TestVectors.string("signing_public_b64"),
+        identityPublicKey: identityB64,
+        signingPublicKeySignature: Base64.encodeStandard(
+          try sign(privateKey: signingPrivate, payload: signingSPKI))),
+    ]
+    for key in unauthorized {
+      XCTAssertThrowsError(
+        try XChatCore().decryptEvent(
+          TestVectors.string("event_message_b64"),
+          conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
+          signingKeys: [key])
+      ) { error in
+        XCTAssertEqual((error as? XChatError)?.kind, .verification)
+      }
     }
   }
 }
