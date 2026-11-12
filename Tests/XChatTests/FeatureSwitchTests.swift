@@ -1,3 +1,4 @@
+import Testing
 import XCTest
 
 @testable import XChat
@@ -57,17 +58,6 @@ final class FeatureSwitchTests: XCTestCase {
         }
     }
 
-    /// Members that are not JSON booleans read off; other members are ignored.
-    func testNonBooleanValuesReadOff() {
-        let enabled = XChatCore.parseFeatures(
-            body(
-                #"""
-                {"features":{"v1_send":1,"other":"true","third":null,"fourth":true},
-                 "ignored":"x"}
-                """#))
-        XCTAssertEqual(enabled, ["fourth"])
-    }
-
     /// An accepted answer switches the send format end to end: the next
     /// message carries contents_encryption_version 1.
     func testV1SendFromFeaturesReachesTheWire() throws {
@@ -123,4 +113,14 @@ final class FeatureSwitchTests: XCTestCase {
         XCTAssertEqual(FeatureFetch.retryDelayMilliseconds(failures: 10), 300_000)
         XCTAssertEqual(FeatureFetch.retryDelayMilliseconds(failures: 100), 300_000)
     }
+}
+
+/// Only JSON booleans can enable a switch.
+@Test func featureSwitchesIgnoreNonBooleanValues() {
+    let json = """
+        {"features":{"v1_send":1,"string":"true","null":null,"enabled":true,
+                     "disabled":false,"array":[true],"object":{"value":true}},
+         "ignored":"x"}
+        """
+    #expect(XChatCore.parseFeatures(Array(json.utf8)) == ["enabled"])
 }

@@ -1,4 +1,3 @@
-import CoreFoundation
 import Foundation
 
 extension XChatCore {
@@ -24,27 +23,23 @@ extension XChatCore {
     /// a JSON object with a `features` object. Members whose value is not a
     /// boolean read off; other top-level members are ignored.
     static func parseFeatures(_ body: [UInt8]) -> Set<String>? {
-        guard let data = try? JSONSerialization.jsonObject(with: Data(body)) as? [String: Any],
-            let features = data["features"] as? [String: Any]
+        guard let response = try? JSONDecoder().decode(FeatureResponse.self, from: Data(body))
         else { return nil }
-        var enabled: Set<String> = []
-        for (name, value) in features {
-            if booleanValue(value) == true {
-                enabled.insert(name)
-            }
-        }
-        return enabled
+        return Set(response.features.compactMap { name, flag in
+            flag.isEnabled ? name : nil
+        })
     }
 
-    /// The value of a JSON boolean, or nil for any other JSON value. Foundation
-    /// bridges numbers to `Bool`, so only a CFBoolean counts.
-    private static func booleanValue(_ value: Any) -> Bool? {
-        guard let bool = value as? Bool else { return nil }
-        if let number = value as? NSNumber,
-            CFGetTypeID(number) != CFBooleanGetTypeID()
-        {
-            return nil
+    private struct FeatureResponse: Decodable {
+        var features: [String: FeatureFlag]
+    }
+
+    private struct FeatureFlag: Decodable {
+        var isEnabled: Bool
+
+        init(from decoder: any Decoder) throws {
+            let value = try decoder.singleValueContainer()
+            isEnabled = (try? value.decode(Bool.self)) == true
         }
-        return bool
     }
 }
