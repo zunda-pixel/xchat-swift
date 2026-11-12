@@ -18,6 +18,7 @@ let package = Package(
     platforms: [.macOS(.v27), .iOS(.v27)],
     products: [
         .library(name: "XChat", targets: ["XChat"]),
+        .library(name: "Juicebox", targets: ["Juicebox"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.10.0"),
@@ -34,10 +35,23 @@ let package = Package(
             ],
             swiftSettings: swiftSettings
         ),
+        .target(
+            name: "Juicebox",
+            dependencies: [
+                .product(name: "Crypto", package: "swift-crypto")
+            ],
+            swiftSettings: swiftSettings
+        ),
         .testTarget(
             name: "XChatTests",
             dependencies: ["XChat"],
             resources: [.copy("Fixtures/sdk_vectors.json")],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "JuiceboxTests",
+            dependencies: ["Juicebox"],
+            resources: [.copy("Fixtures/noise_nk_vectors.json")],
             swiftSettings: swiftSettings
         ),
     ],
