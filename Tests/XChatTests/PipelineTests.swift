@@ -59,8 +59,10 @@ final class PipelineTests: XCTestCase {
         let keyVersion = TestVectors.string("message_key_conversation_key_version")
         let event = try XChatCore().decryptEvent(
             TestVectors.string("event_message_key_b64"),
-            conversationKeys: [keyVersion: try Hex.decode(
-                TestVectors.string("message_key_conversation_key_hex"))],
+            conversationKeys: [
+                keyVersion: try Hex.decode(
+                    TestVectors.string("message_key_conversation_key_hex"))
+            ],
             signingKeys: [signingKey(userId: TestVectors.string("message_key_sender_id"))])
 
         let message = try message(event)
@@ -290,8 +292,10 @@ final class PipelineTests: XCTestCase {
         let keyVersion = TestVectors.string("message_key_conversation_key_version")
         let event = try XChatCore().decryptEvent(
             TestVectors.string("event_message_key_b64"),
-            conversationKeys: [keyVersion: try Hex.decode(
-                TestVectors.string("message_key_conversation_key_hex"))],
+            conversationKeys: [
+                keyVersion: try Hex.decode(
+                    TestVectors.string("message_key_conversation_key_hex"))
+            ],
             signingKeys: [signingKey(userId: TestVectors.string("message_key_sender_id"))])
         let message = try message(event)
 

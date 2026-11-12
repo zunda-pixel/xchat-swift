@@ -136,9 +136,10 @@ struct MessageEventSignature: Sendable, Equatable {
                     field, "signing_public_key", &reader)
             case 5:
                 signature.messageSigningKeyInfoList = try readStructList(
-                    field, "message_signing_key_info_list", &reader) {
-                        try MessageSigningKeyInfo.read(&$0)
-                    }
+                    field, "message_signing_key_info_list", &reader
+                ) {
+                    try MessageSigningKeyInfo.read(&$0)
+                }
             default:
                 try reader.skip(field.type)
             }
@@ -394,9 +395,10 @@ struct ConversationKeyChangeEvent: Sendable, Equatable {
                     field, "conversation_key_version", &reader)
             case 2:
                 event.conversationParticipantKeys = try readStructList(
-                    field, "conversation_participant_keys", &reader) {
-                        try ConversationParticipantKey.read(&$0)
-                    }
+                    field, "conversation_participant_keys", &reader
+                ) {
+                    try ConversationParticipantKey.read(&$0)
+                }
             case 5:
                 event.forKeyRotation = try readBoolField(field, "for_key_rotation", &reader)
             default:

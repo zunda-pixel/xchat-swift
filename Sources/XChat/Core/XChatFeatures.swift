@@ -25,9 +25,10 @@ extension XChatCore {
     static func parseFeatures(_ body: [UInt8]) -> Set<String>? {
         guard let response = try? JSONDecoder().decode(FeatureResponse.self, from: Data(body))
         else { return nil }
-        return Set(response.features.compactMap { name, flag in
-            flag.isEnabled ? name : nil
-        })
+        return Set(
+            response.features.compactMap { name, flag in
+                flag.isEnabled ? name : nil
+            })
     }
 
     private struct FeatureResponse: Decodable {

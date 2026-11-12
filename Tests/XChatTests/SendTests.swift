@@ -106,16 +106,18 @@ final class SendTests: XCTestCase {
         XCTAssertEqual(message.text, text)
         XCTAssertTrue(message.verified)
         XCTAssertEqual(message.shouldNotify, false)
-        XCTAssertEqual(message.content, .text(
-            TextContent(
-                text: text,
-                entities: [RichTextEntityInfo(startIndex: 3, endIndex: 9, kind: .mention)],
-                attachments: [],
-                replyingToPreview: nil,
-                forwardedMessage: nil,
-                sentFrom: nil,
-                quickReply: nil,
-                callToActions: nil)))
+        XCTAssertEqual(
+            message.content,
+            .text(
+                TextContent(
+                    text: text,
+                    entities: [RichTextEntityInfo(startIndex: 3, endIndex: 9, kind: .mention)],
+                    attachments: [],
+                    replyingToPreview: nil,
+                    forwardedMessage: nil,
+                    sentFrom: nil,
+                    quickReply: nil,
+                    callToActions: nil)))
 
         // v1 carries contents_encryption_version 1 and signs at v10.
         let detailBytes = try Base64.decodeStandard(payload.encodedMessageCreateEvent)

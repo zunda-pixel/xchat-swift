@@ -83,7 +83,8 @@ final class SecretBoxTests: XCTestCase {
         var nonce = Self.nonce
         nonce[0] ^= 1
         XCTAssertThrowsError(
-            try cipher.decryptDetached(nonce: nonce, ciphertext: Array(Self.ciphertext[16...]), tag: Array(Self.ciphertext[0..<16])))
+            try cipher.decryptDetached(
+                nonce: nonce, ciphertext: Array(Self.ciphertext[16...]), tag: Array(Self.ciphertext[0..<16])))
 
         // A wrong-length tag is rejected without touching the ciphertext.
         XCTAssertThrowsError(

@@ -323,7 +323,8 @@ final class ThriftBinaryTests: XCTestCase {
     /// field types.
     func testGarbageEventRejected() {
         XCTAssertThrowsError(
-            try Base64.decodeStandard(TestVectors.string("event_garbage_b64"))) { error in
+            try Base64.decodeStandard(TestVectors.string("event_garbage_b64"))
+        ) { error in
             XCTAssertEqual((error as? XChatError)?.kind, .parse)
         }
 

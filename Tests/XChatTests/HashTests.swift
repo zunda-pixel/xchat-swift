@@ -67,8 +67,6 @@ final class HashTests: XCTestCase {
         XCTAssertNoThrow(try hkdf(secret: [1], salt: "s", length: 8160))
     }
 
-
-
     func testRandomBytes() {
         let first = randomBytes(32)
         XCTAssertEqual(first.count, 32)

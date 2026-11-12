@@ -205,7 +205,8 @@ public final class XChatCore {
             }
         }
 
-        let latestVersion = batchConversations
+        let latestVersion =
+            batchConversations
             .compactMap { keyHighWater[$0] }
             .max()
             .map(String.init)
@@ -235,8 +236,9 @@ public final class XChatCore {
                 allSigningKeys: allSigningKeys)
         case .conversationKeyChange(let change):
             let key = decryptKeyChangeCkey(change) ?? change.conversationKeyVersion.flatMap { keys[$0] }
-            return .keyChange(try decryptKeyChangeEvent(
-                parsed, change, plaintextKey: key, signingKeys: signingKeys))
+            return .keyChange(
+                try decryptKeyChangeEvent(
+                    parsed, change, plaintextKey: key, signingKeys: signingKeys))
         case .messageTyping(let typing):
             return .typing(
                 Typing(
@@ -383,8 +385,9 @@ public final class XChatCore {
                 let signature = try? Base64.decodeStandard(signatureB64),
                 let signingKey = try? Base64.decodeStandard(entry.publicKey)
             else { return false }
-            return (try? verify(
-                publicKey: signingKey, signature: signature, payload: identity)) ?? false
+            return
+                (try? verify(
+                    publicKey: signingKey, signature: signature, payload: identity)) ?? false
         }
     }
 
@@ -777,7 +780,8 @@ private func openQuotedEvent(
     if usesMessageKey, let carriedKey, carriedKey.count == 32 {
         key = carriedKey
     } else if let version = create.conversationKeyVersion, let conversationKey = keys[version] {
-        key = usesMessageKey
+        key =
+            usesMessageKey
             ? (try? deriveMessageKey(
                 conversationKey: conversationKey,
                 senderId: raw.senderId ?? "",

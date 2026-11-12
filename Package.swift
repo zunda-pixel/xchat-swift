@@ -17,7 +17,7 @@ let package = Package(
     name: "XChat",
     platforms: [.macOS(.v27), .iOS(.v27)],
     products: [
-        .library(name: "XChat", targets: ["XChat"]),
+        .library(name: "XChat", targets: ["XChat"])
     ],
     dependencies: [
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.11.0"),

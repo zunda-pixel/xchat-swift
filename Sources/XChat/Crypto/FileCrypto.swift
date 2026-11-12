@@ -26,7 +26,8 @@ public func encryptedFileSize(_ plaintextSize: UInt64) -> UInt64? {
     if plaintextSize == 0 {
         return UInt64(streamHeaderSize)
     }
-    let chunkCount = plaintextSize / UInt64(decryptedChunkSize)
+    let chunkCount =
+        plaintextSize / UInt64(decryptedChunkSize)
         + (plaintextSize % UInt64(decryptedChunkSize) == 0 ? 0 : 1)
     let (overhead, overheadOverflow) =
         chunkCount.multipliedReportingOverflow(by: UInt64(chunkOverhead))

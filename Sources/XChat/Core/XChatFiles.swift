@@ -362,8 +362,8 @@ extension XChatCore {
             case .media(let media) where media.mediaHashKey == mediaHashKey:
                 return (position, media.attachmentId)
             case .url(let card)
-                where card.bannerImage?.mediaHashKey == mediaHashKey
-                    || card.faviconImage?.mediaHashKey == mediaHashKey:
+            where card.bannerImage?.mediaHashKey == mediaHashKey
+                || card.faviconImage?.mediaHashKey == mediaHashKey:
                 return (position, card.attachmentId)
             default:
                 position += 1

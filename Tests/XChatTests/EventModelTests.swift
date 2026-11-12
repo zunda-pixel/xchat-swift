@@ -203,8 +203,11 @@ final class EventModelTests: XCTestCase {
         let contents = MessageContents(
             messageText: "hello",
             entities: [entity],
-            attachments: [.media(media), .url(url), .post(
-                PostAttachment(restId: "1", postURL: "u", attachmentId: "2"))],
+            attachments: [
+                .media(media), .url(url),
+                .post(
+                    PostAttachment(restId: "1", postURL: "u", attachmentId: "2")),
+            ],
             replyingToPreview: preview,
             forwardedMessage: ForwardedMessage(messageText: "fwd", entities: [entity]),
             sentFrom: 1,

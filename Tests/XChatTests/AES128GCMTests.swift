@@ -40,12 +40,14 @@ final class AES128GCMTests: XCTestCase {
             ),
             (
                 "e47e1e3a95627418ed659452a3c92d45", "78adcf3f732dd3787cb5490b",
-                "801efcab1e329a536a7b506c4a7509ec", "41913a6c5c4dddae06f3c0f68e8ece139ca902fe340a820e7c40d895b35e8f4cba7809c7eed0b2b7ad45c6d152ec3053",
+                "801efcab1e329a536a7b506c4a7509ec",
+                "41913a6c5c4dddae06f3c0f68e8ece139ca902fe340a820e7c40d895b35e8f4cba7809c7eed0b2b7ad45c6d152ec3053",
                 "6751a4a5e0cc3c0f46cb5540937efde8", "7b07d21a4cbadeedcadce817d9ab81be"
             ),
             (
                 "11f47551416154006bf89e7594ea2082", "d546fcd3ff2a6a17461e9e94",
-                "d3783a3d7a1e091f9cb647bf45604457", "49efdce48e821eb14eca5f1dd661f8b6b9a5a6917b08ec9486c29124ef1e7a9af2217494eecad3d8eef9fc22d29ce18d92006de1588c3b06f8db9fe809bede40908cef4f46d2c4b6f92ff5a8304362749143dab266de45bf5b4a",
+                "d3783a3d7a1e091f9cb647bf45604457",
+                "49efdce48e821eb14eca5f1dd661f8b6b9a5a6917b08ec9486c29124ef1e7a9af2217494eecad3d8eef9fc22d29ce18d92006de1588c3b06f8db9fe809bede40908cef4f46d2c4b6f92ff5a8304362749143dab266de45bf5b4a",
                 "e97988a6645b93a32e8296bb1dbcb8f9", "399345f974a82a2a75007c84aa08dc1a"
             ),
         ]
