@@ -67,27 +67,7 @@ final class HashTests: XCTestCase {
         XCTAssertNoThrow(try hkdf(secret: [1], salt: "s", length: 8160))
     }
 
-    func testKDF2LengthAndPrefix() {
-        let secret = [UInt8](repeating: 7, count: 32)
-        let info = Array("ephemeral".utf8)
-        XCTAssertEqual(kdf2SHA256(sharedSecret: secret, sharedInfo: info, length: 0), [])
-        XCTAssertEqual(kdf2SHA256(sharedSecret: secret, sharedInfo: info, length: 16).count, 16)
-        let full = kdf2SHA256(sharedSecret: secret, sharedInfo: info, length: 64)
-        XCTAssertEqual(full.count, 64)
-        // KDF2 is a truncation of the same stream.
-        XCTAssertEqual(
-            Array(full.prefix(16)),
-            kdf2SHA256(sharedSecret: secret, sharedInfo: info, length: 16))
-        // The counter is a 4-byte big-endian value starting at 1, so one
-        // round over an empty secret and info is SHA-256 of just the counter.
-        XCTAssertEqual(
-            kdf2SHA256(sharedSecret: [], sharedInfo: [], length: 32),
-            sha256([0x00, 0x00, 0x00, 0x01]))
-        // Different shared info gives different output.
-        XCTAssertNotEqual(
-            kdf2SHA256(sharedSecret: secret, sharedInfo: Array("other".utf8), length: 32),
-            kdf2SHA256(sharedSecret: secret, sharedInfo: info, length: 32))
-    }
+
 
     func testRandomBytes() {
         let first = randomBytes(32)

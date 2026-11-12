@@ -48,9 +48,9 @@ final class SecretBoxTests: XCTestCase {
         XCTAssertEqual(Self.ciphertext.count, 147)
     }
 
-    func testNaClSecretboxEncrypt() {
+    func testNaClSecretboxEncrypt() throws {
         let cipher = XSalsa20Poly1305(key: Self.key)
-        let (ciphertext, tag) = cipher.encryptDetached(nonce: Self.nonce, plaintext: Self.plaintext)
+        let (ciphertext, tag) = try cipher.encryptDetached(nonce: Self.nonce, plaintext: Self.plaintext)
         XCTAssertEqual(tag, Array(Self.ciphertext[0..<16]))
         XCTAssertEqual(ciphertext, Array(Self.ciphertext[16...]))
     }
@@ -67,7 +67,7 @@ final class SecretBoxTests: XCTestCase {
     /// The reference crate's `decrypt_modified`: a tweaked ciphertext byte
     /// must fail verification. Every region is covered: ciphertext, tag,
     /// and a keystream-affecting nonce byte.
-    func testTamperRejected() {
+    func testTamperRejected() throws {
         let cipher = XSalsa20Poly1305(key: Self.key)
 
         var ct = Array(Self.ciphertext[16...])
@@ -91,9 +91,9 @@ final class SecretBoxTests: XCTestCase {
                 nonce: Self.nonce, ciphertext: Array(Self.ciphertext[16...]), tag: Array(Self.ciphertext[0..<15])))
     }
 
-    func testEmptyPlaintext() {
+    func testEmptyPlaintext() throws {
         let cipher = XSalsa20Poly1305(key: Self.key)
-        let (ciphertext, tag) = cipher.encryptDetached(nonce: Self.nonce, plaintext: [])
+        let (ciphertext, tag) = try cipher.encryptDetached(nonce: Self.nonce, plaintext: [])
         XCTAssertEqual(ciphertext, [])
         XCTAssertEqual(tag.count, 16)
         let plaintext = try! cipher.decryptDetached(nonce: Self.nonce, ciphertext: ciphertext, tag: tag)
@@ -102,7 +102,7 @@ final class SecretBoxTests: XCTestCase {
 
     /// The NaCl test suite's message-length sweep: every length from 0 to
     /// 1024 round-trips, exercising every Poly1305 padding case.
-    func testRoundTripAllLengths0To1024() {
+    func testRoundTripAllLengths0To1024() throws {
         let key = (0..<32).map { UInt8($0 % 256) }
         let nonce = (0..<24).map { UInt8((32 + $0) % 256) }
         let full = (0..<1024).map { UInt8($0 % 256) }
@@ -110,7 +110,7 @@ final class SecretBoxTests: XCTestCase {
 
         for length in 0...1024 {
             let message = Array(full[0..<length])
-            let (ciphertext, tag) = cipher.encryptDetached(nonce: nonce, plaintext: message)
+            let (ciphertext, tag) = try cipher.encryptDetached(nonce: nonce, plaintext: message)
             XCTAssertEqual(ciphertext.count, length)
             let decrypted = try! cipher.decryptDetached(nonce: nonce, ciphertext: ciphertext, tag: tag)
             XCTAssertEqual(decrypted, message, "length \(length)")
@@ -146,7 +146,7 @@ final class SecretBoxTests: XCTestCase {
         XCTAssertEqual(try! decryptMessage(key: key, ciphertext: second), message)
     }
 
-    func testMessageWireTamperRejected() {
+    func testMessageWireTamperRejected() throws {
         let key = (0..<32).map { _ in UInt8.random(in: 0...255) }
         let message = Array("message to encrypt".utf8)
         let box = try! encryptMessage(key: key, plaintext: message)
@@ -158,7 +158,7 @@ final class SecretBoxTests: XCTestCase {
         }
     }
 
-    func testMessageWireTooShort() {
+    func testMessageWireTooShort() throws {
         let key = (0..<32).map { _ in UInt8.random(in: 0...255) }
         for length in [0, 1, 24, 39] {
             let truncated = [UInt8](repeating: 0, count: length)
@@ -170,7 +170,7 @@ final class SecretBoxTests: XCTestCase {
         }
     }
 
-    func testMessageWireInvalidKeyLength() {
+    func testMessageWireInvalidKeyLength() throws {
         let shortKey = [UInt8](repeating: 1, count: 16)
         let longKey = [UInt8](repeating: 1, count: 33)
         let message = Array("hi".utf8)
@@ -190,7 +190,7 @@ final class SecretBoxTests: XCTestCase {
         }
     }
 
-    func testMessageWireWrongKey() {
+    func testMessageWireWrongKey() throws {
         let key = (0..<32).map { _ in UInt8.random(in: 0...255) }
         let otherKey = (0..<32).map { _ in UInt8.random(in: 0...255) }
         let message = Array("message to encrypt".utf8)

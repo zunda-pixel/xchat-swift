@@ -8,7 +8,7 @@ enum OPRF {
     static let proofDomain = Array("Juicebox_DLEQ_2023_1;".utf8)
 
     struct BlindingFactor: Sendable {
-        let scalar: Scalar52
+        let scalar: RistrettoScalar
     }
 
     struct BlindedInput: Sendable {
@@ -46,21 +46,23 @@ enum OPRF {
     }
 
     struct Proof: Sendable {
-        let c: Scalar52
-        let betaZ: Scalar52
+        let c: RistrettoScalar
+        let betaZ: RistrettoScalar
 
         /// The wire form is two 32-byte scalars.
-        var bytes: [UInt8] { c.asBytes() + betaZ.asBytes() }
+        var bytes: [UInt8] { c.bytes + betaZ.bytes }
 
-        init(c: Scalar52, betaZ: Scalar52) {
+        init(c: RistrettoScalar, betaZ: RistrettoScalar) {
             self.c = c
             self.betaZ = betaZ
         }
 
         init(bytes: [UInt8]) throws {
             guard bytes.count == 64 else { throw OPRFError.invalidProof }
-            c = Scalar52.fromBytes(Array(bytes[0..<32]))
-            betaZ = Scalar52.fromBytes(Array(bytes[32..<64]))
+            guard let challenge = RistrettoScalar(canonicalBytes: Array(bytes.prefix(32))),
+                let response = RistrettoScalar(canonicalBytes: Array(bytes.suffix(32)))
+            else { throw OPRFError.invalidProof }
+            self.init(c: challenge, betaZ: response)
         }
     }
 
@@ -72,7 +74,7 @@ enum OPRF {
     }
 
     static func start(
-        input: [UInt8], blindingFactor: Scalar52
+        input: [UInt8], blindingFactor: RistrettoScalar
     ) -> (BlindingFactor, BlindedInput) {
         let inputPoint = RistrettoPoint.hashToGroup(input)
         let blinded = inputPoint.scalarMultiply(blindingFactor)
@@ -104,24 +106,24 @@ enum OPRF {
         let expected = challenge(
             u: blindedInput.compressed, v: publicKey, w: blindedOutput.compressed,
             vT: vT.compress(), wT: wT.compress())
-        return Scalar52.ctEquals(expected, proof.c).boolValue
+        return expected == proof.c
     }
 
     // MARK: Server (used by tests and non-interactive paths)
 
-    static func publicKey(for privateKey: Scalar52) -> [UInt8] {
+    static func publicKey(for privateKey: RistrettoScalar) -> [UInt8] {
         RistrettoPoint.basepoint.scalarMultiply(privateKey).compress()
     }
 
     static func evaluate(
-        privateKey: Scalar52, blindedInput: BlindedInput
+        privateKey: RistrettoScalar, blindedInput: BlindedInput
     ) -> BlindedOutput {
         BlindedOutput(point: blindedInput.point.scalarMultiply(privateKey))
     }
 
     static func generateProof(
-        privateKey: Scalar52,
-        nonce: Scalar52,
+        privateKey: RistrettoScalar,
+        nonce: RistrettoScalar,
         blindedInput: BlindedInput,
         publicKey: [UInt8],
         blindedOutput: BlindedOutput
@@ -137,7 +139,7 @@ enum OPRF {
 
     /// Evaluates locally, giving the same output as a full interaction.
     static func unobliviousEvaluate(
-        privateKey: Scalar52, input: [UInt8]
+        privateKey: RistrettoScalar, input: [UInt8]
     ) -> [UInt8] {
         let result = RistrettoPoint.hashToGroup(input).scalarMultiply(privateKey)
         return hashToOutput(input: input, result: result)
@@ -154,14 +156,14 @@ enum OPRF {
 
     private static func challenge(
         u: [UInt8], v: [UInt8], w: [UInt8], vT: [UInt8], wT: [UInt8]
-    ) -> Scalar52 {
+    ) -> RistrettoScalar {
         var data = proofDomain
         data += u
         data += v
         data += w
         data += vT
         data += wT
-        return Scalar52.fromBytesWide(Array(SHA512.hash(data: data)))
+        return RistrettoScalar.fromBytesWide(Array(SHA512.hash(data: data)))
     }
 }
 

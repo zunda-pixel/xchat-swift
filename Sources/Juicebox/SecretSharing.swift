@@ -4,7 +4,7 @@ protocol SecretShareable: Sendable {
     static var additiveIdentity: Self { get }
     static func random() -> Self
     static func adding(_ lhs: Self, _ rhs: Self) -> Self
-    static func multiplied(_ value: Self, by scalar: Scalar52) -> Self
+    static func multiplied(_ value: Self, by scalar: RistrettoScalar) -> Self
 }
 
 struct SecretShare<Secret: SecretShareable>: Sendable {
@@ -16,10 +16,10 @@ enum SecretSharingError: Error, Equatable {
     case duplicateShares
 }
 
-extension Scalar52: SecretShareable {
-    static var additiveIdentity: Scalar52 { .zero }
-    static func adding(_ lhs: Scalar52, _ rhs: Scalar52) -> Scalar52 { lhs + rhs }
-    static func multiplied(_ value: Scalar52, by scalar: Scalar52) -> Scalar52 { value * scalar }
+extension RistrettoScalar: SecretShareable {
+    static var additiveIdentity: RistrettoScalar { .zero }
+    static func adding(_ lhs: RistrettoScalar, _ rhs: RistrettoScalar) -> RistrettoScalar { lhs + rhs }
+    static func multiplied(_ value: RistrettoScalar, by scalar: RistrettoScalar) -> RistrettoScalar { value * scalar }
 }
 
 extension RistrettoPoint: SecretShareable {
@@ -30,20 +30,20 @@ extension RistrettoPoint: SecretShareable {
     static func adding(_ lhs: RistrettoPoint, _ rhs: RistrettoPoint) -> RistrettoPoint {
         lhs + rhs
     }
-    static func multiplied(_ value: RistrettoPoint, by scalar: Scalar52) -> RistrettoPoint {
+    static func multiplied(_ value: RistrettoPoint, by scalar: RistrettoScalar) -> RistrettoPoint {
         value.scalarMultiply(scalar)
     }
 }
 
 /// The scalar for a share index: the index in the low four little-endian
 /// bytes.
-func shareIndexScalar(_ index: UInt32) -> Scalar52 {
+func shareIndexScalar(_ index: UInt32) -> RistrettoScalar {
     var bytes = [UInt8](repeating: 0, count: 32)
     bytes[0] = UInt8(truncatingIfNeeded: index)
     bytes[1] = UInt8(truncatingIfNeeded: index >> 8)
     bytes[2] = UInt8(truncatingIfNeeded: index >> 16)
     bytes[3] = UInt8(truncatingIfNeeded: index >> 24)
-    return Scalar52.fromBytes(bytes)
+    return RistrettoScalar(canonicalBytes: bytes)!
 }
 
 /// Distributes `secret` into `count` shares; any `threshold` recover it.
@@ -74,8 +74,8 @@ func recoverSecret<Secret: SecretShareable>(
 ) throws -> Secret {
     var result = Secret.additiveIdentity
     for (i, share) in shares.enumerated() {
-        var numerator = Scalar52.one
-        var denominator = Scalar52.one
+        var numerator = RistrettoScalar.one
+        var denominator = RistrettoScalar.one
         let xi = shareIndexScalar(share.index)
         for (j, other) in shares.enumerated() where j != i {
             let xj = shareIndexScalar(other.index)

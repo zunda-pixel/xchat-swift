@@ -87,7 +87,7 @@ public struct FileEncryptor {
         }
         var offset = 0
         while buf.count - offset > decryptedChunkSize {
-            out += stream.push(Array(buf[offset..<offset + decryptedChunkSize]), tag: .message)
+            out += try stream.push(Array(buf[offset..<offset + decryptedChunkSize]), tag: .message)
             offset += decryptedChunkSize
         }
         buf.removeFirst(offset)
@@ -103,7 +103,7 @@ public struct FileEncryptor {
         var out = prefix
         prefix = []
         if started {
-            out += stream.push(buf, tag: .final)
+            out += try stream.push(buf, tag: .final)
             buf = []
         }
         return out

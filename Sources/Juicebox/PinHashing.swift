@@ -1,3 +1,5 @@
+import argon2
+
 /// Juicebox's PIN stretching: Argon2id with a salt built from the
 /// registration version and user info, producing the OPRF access key and the
 /// seed that encrypts the recovered user secret.
@@ -6,7 +8,7 @@ func juiceboxPinHash(
     registrationVersion: [UInt8],
     userInfo: [UInt8] = [],
     mode: JuiceboxPinHashingMode = .standard2019
-) -> (accessKey: [UInt8], encryptionKeySeed: [UInt8]) {
+) throws -> (accessKey: [UInt8], encryptionKeySeed: [UInt8]) {
     var salt: [UInt8] = []
     salt += be32(UInt32(registrationVersion.count))
     salt += registrationVersion
@@ -14,10 +16,10 @@ func juiceboxPinHash(
     salt += userInfo
 
     let parameters = mode.parameters
-    let hashed = Argon2.id(
-        password: pin, salt: salt,
-        memoryCost: parameters.memory, timeCost: parameters.time,
-        parallelism: parameters.parallelism,
-        outputLength: 64)
-    return (Array(hashed[0..<32]), Array(hashed[32..<64]))
+    var hash = [UInt8](repeating: 0, count: 64)
+    let status = unsafe argon2id_hash_raw(
+        parameters.time, parameters.memory, parameters.parallelism,
+        pin, pin.count, salt, salt.count, &hash, hash.count)
+    guard status == 0 else { throw JuiceboxRecoveryError.assertion }
+    return (Array(hash.prefix(32)), Array(hash.suffix(32)))
 }

@@ -85,6 +85,14 @@ final class RealmProtocolTests: XCTestCase {
         XCTAssertThrowsError(try decodeCBOR([0x5f]))  // indefinite lengths
     }
 
+    func testCBORTagsCountTowardNestingLimit() throws {
+        XCTAssertEqual(try decodeCBOR([0xc0, 0x00]), .unsigned(0))
+        let tags = [UInt8](repeating: 0xc0, count: 64)
+        XCTAssertThrowsError(try decodeCBOR(tags + [0x00])) { error in
+            XCTAssertEqual(error as? CBORError, .depthExceeded)
+        }
+    }
+
     // MARK: Configuration
 
     static let configurationJSON = """

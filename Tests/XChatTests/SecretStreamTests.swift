@@ -14,7 +14,7 @@ final class SecretStreamTests: XCTestCase {
 
     /// Guards the fixture's shape: a 24-byte header, one full 1041-byte
     /// frame, and a 493-byte final frame for 476 plaintext bytes.
-    func testVectorShape() {
+    func testVectorShape() throws {
         XCTAssertEqual(Self.key.count, 32)
         XCTAssertEqual(Self.plaintext.count, 1500)
         XCTAssertEqual(Self.encrypted.count, 24 + 1041 + 493)
@@ -47,7 +47,7 @@ final class SecretStreamTests: XCTestCase {
             let message = Array(full[0..<length])
             let (header, pusher) = try SecretStreamPush.start(key: key)
             var push = pusher
-            let frame = push.push(message, tag: .final)
+            let frame = try push.push(message, tag: .final)
             XCTAssertEqual(frame.count, 17 + length, "length \(length)")
 
             var pull = try SecretStreamPull(header: header, key: key)
@@ -62,7 +62,7 @@ final class SecretStreamTests: XCTestCase {
         let key = TestVectors.bytes("conversation_key_b64")
         let (header, pusher) = try SecretStreamPush.start(key: key)
         var push = pusher
-        let frame = push.push([], tag: .message)
+        let frame = try push.push([], tag: .message)
         XCTAssertEqual(frame.count, 17)
 
         var pull = try SecretStreamPull(header: header, key: key)
@@ -88,7 +88,7 @@ final class SecretStreamTests: XCTestCase {
         var push = pusher
         var frames: [[UInt8]] = []
         for (tag, message) in messages {
-            frames.append(push.push(message, tag: tag))
+            frames.append(try push.push(message, tag: tag))
         }
 
         var pull = try SecretStreamPull(header: header, key: key)
@@ -108,7 +108,7 @@ final class SecretStreamTests: XCTestCase {
 
         let (header, pusher) = try SecretStreamPush.start(key: key)
         var push = pusher
-        let frame = push.push(message, associatedData: aad, tag: .final)
+        let frame = try push.push(message, associatedData: aad, tag: .final)
 
         var pull = try SecretStreamPull(header: header, key: key)
         let (decrypted, _) = try pull.pull(frame, associatedData: aad)
@@ -121,7 +121,7 @@ final class SecretStreamTests: XCTestCase {
         let key = TestVectors.bytes("conversation_key_b64")
         let (header, pusher) = try SecretStreamPush.start(key: key)
         var push = pusher
-        let frame = push.push([1, 2, 3], associatedData: Array("right".utf8), tag: .final)
+        let frame = try push.push([1, 2, 3], associatedData: Array("right".utf8), tag: .final)
 
         var pull = try SecretStreamPull(header: header, key: key)
         XCTAssertThrowsError(try pull.pull(frame, associatedData: Array("wrong".utf8))) { error in
@@ -173,7 +173,7 @@ final class SecretStreamTests: XCTestCase {
     }
 
     /// Invalid key and header lengths are input errors naming the value.
-    func testInvalidLengths() {
+    func testInvalidLengths() throws {
         for length in [0, 16, 31, 33] {
             XCTAssertThrowsError(try SecretStreamPush.start(key: [UInt8](repeating: 0, count: length))) {
                 error in

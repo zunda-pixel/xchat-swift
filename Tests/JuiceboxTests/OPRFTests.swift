@@ -29,33 +29,30 @@ final class OPRFTests: XCTestCase {
 
     /// Values computed modulo ℓ with plain integer arithmetic.
     func testScalarInverse() {
-        let a = Scalar52.fromBytes(Self.hex(
-            "d20a1feb8ca954ab000000000000000000000000000000000000000000000000"))
+        let a = RistrettoScalar(canonicalBytes: Self.hex("d20a1feb8ca954ab000000000000000000000000000000000000000000000000"))!
         XCTAssertEqual(
-            Self.hexString(a.invert().asBytes()),
+            Self.hexString(a.invert().bytes),
             "cba0dad3040690be498d79ec4da6be70902b211b7764b03a5444163bdd803b0d")
         XCTAssertEqual(a * a.invert(), .one)
 
-        let b = Scalar52.fromBytes(Self.hex(
-            "b10cc7e1389df8ffc2d9203f0100000000000000000000000000000000000000"))
+        let b = RistrettoScalar(canonicalBytes: Self.hex("b10cc7e1389df8ffc2d9203f0100000000000000000000000000000000000000"))!
         XCTAssertEqual(
-            Self.hexString(b.invert().asBytes()),
+            Self.hexString(b.invert().bytes),
             "98b81d8edb199bb35349fb2f95c3bbd3a246b91fbaf6901f263c0d3a85fbaf09")
     }
 
     func testBlindEvaluateFinalizeMatchesUnoblivious() {
         let input = Array("user secret input".utf8)
-        let privateKey = Scalar52.fromBytes(Self.hex(
-            "d20a1feb8ca954ab000000000000000000000000000000000000000000000000"))
-        let blinding = Scalar52.fromBytes(Self.hex(
-            "b10cc7e1389df8ffc2d9203f0100000000000000000000000000000000000000"))
+        let privateKey = RistrettoScalar(canonicalBytes: Self.hex("d20a1feb8ca954ab000000000000000000000000000000000000000000000000"))!
+        let blinding = RistrettoScalar(canonicalBytes: Self.hex("b10cc7e1389df8ffc2d9203f0100000000000000000000000000000000000000"))!
         let publicKey = OPRF.publicKey(for: privateKey)
 
         let (factor, blindedInput) = OPRF.start(input: input, blindingFactor: blinding)
         let blindedOutput = OPRF.evaluate(privateKey: privateKey, blindedInput: blindedInput)
 
-        let nonce = Scalar52.fromBytes(Self.hex(
-            "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"))
+        let nonce = RistrettoScalar.fromBytesWide(
+            Self.hex("0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0")
+                + RistrettoScalar.zero.bytes)
         let proof = OPRF.generateProof(
             privateKey: privateKey, nonce: nonce, blindedInput: blindedInput,
             publicKey: publicKey, blindedOutput: blindedOutput)
@@ -71,7 +68,7 @@ final class OPRFTests: XCTestCase {
     }
 
     func testProofRejectsWrongValues() {
-        let privateKey = Scalar52.random()
+        let privateKey = RistrettoScalar.random()
         let publicKey = OPRF.publicKey(for: privateKey)
         let (_, blindedInput) = OPRF.start(input: Array("input".utf8))
         let blindedOutput = OPRF.evaluate(privateKey: privateKey, blindedInput: blindedInput)
@@ -116,19 +113,22 @@ final class OPRFTests: XCTestCase {
     }
 
     func testProofWireForm() throws {
-        let c = Scalar52.fromBytes(Self.hex(
-            "d20a1feb8ca954ab000000000000000000000000000000000000000000000000"))
-        let betaZ = Scalar52.fromBytes(Self.hex(
-            "b10cc7e1389df8ffc2d9203f0100000000000000000000000000000000000000"))
+        let c = RistrettoScalar(canonicalBytes: Self.hex("d20a1feb8ca954ab000000000000000000000000000000000000000000000000"))!
+        let betaZ = RistrettoScalar(canonicalBytes: Self.hex("b10cc7e1389df8ffc2d9203f0100000000000000000000000000000000000000"))!
         let proof = OPRF.Proof(c: c, betaZ: betaZ)
         XCTAssertEqual(proof.bytes.count, 64)
         let decoded = try OPRF.Proof(bytes: proof.bytes)
         XCTAssertEqual(decoded.c, c)
         XCTAssertEqual(decoded.betaZ, betaZ)
+
+        let groupOrder = Self.hex("edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010")
+        XCTAssertThrowsError(try OPRF.Proof(bytes: groupOrder + betaZ.bytes)) { error in
+            XCTAssertEqual(error as? OPRFError, .invalidProof)
+        }
     }
 
     func testBlindedPointsRoundTrip() throws {
-        let privateKey = Scalar52.random()
+        let privateKey = RistrettoScalar.random()
         let (_, input) = OPRF.start(input: Array("round trip".utf8))
         let output = OPRF.evaluate(privateKey: privateKey, blindedInput: input)
         XCTAssertEqual(try OPRF.BlindedInput(compressed: input.compressed).compressed, input.compressed)

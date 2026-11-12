@@ -19,8 +19,8 @@ final class RecoveryFlowTests: XCTestCase {
         let id: [UInt8]
         let url: String
         let token: String
-        let oprfShare: Scalar52
-        let scalarShare: Scalar52
+        let oprfShare: RistrettoScalar
+        let scalarShare: RistrettoScalar
         let encryptedSecret: [UInt8]
         let secretCommitment: [UInt8]
         let unlockKeyCommitment: [UInt8]
@@ -93,8 +93,8 @@ final class RecoveryFlowTests: XCTestCase {
                             key: .text("oprf_blinded_result"),
                             value: .bytes(blindedOutput.compressed)),
                         CBORPair(key: .text("oprf_proof"), value: .map([
-                            CBORPair(key: .text("c"), value: .bytes(proof.c.asBytes())),
-                            CBORPair(key: .text("beta_z"), value: .bytes(proof.betaZ.asBytes())),
+                            CBORPair(key: .text("c"), value: .bytes(proof.c.bytes)),
+                            CBORPair(key: .text("beta_z"), value: .bytes(proof.betaZ.bytes)),
                         ])),
                         CBORPair(
                             key: .text("unlock_key_commitment"),
@@ -123,7 +123,7 @@ final class RecoveryFlowTests: XCTestCase {
                     CBORPair(key: .text("Ok"), value: .map([
                         CBORPair(
                             key: .text("encryption_key_scalar_share"),
-                            value: .bytes(realm.scalarShare.asBytes())),
+                            value: .bytes(realm.scalarShare.bytes)),
                         CBORPair(
                             key: .text("encrypted_secret"),
                             value: .bytes(realm.encryptedSecret)),
@@ -157,29 +157,29 @@ final class RecoveryFlowTests: XCTestCase {
 
     func makeNetwork(
         pin: [UInt8] = RecoveryFlowTests.pin
-    ) -> (FakeNetwork, JuiceboxConfiguration, [String: String]) {
+    ) throws -> (FakeNetwork, JuiceboxConfiguration, [String: String]) {
         let realmIds = (0..<Self.realmCount).map { index in
             [UInt8](repeating: UInt8(index + 1), count: 16)
         }
         let tokens = Dictionary(
             uniqueKeysWithValues: realmIds.map { (hexString($0), "token-\(hexString($0))") })
 
-        let (accessKey, seed) = juiceboxPinHash(
+        let (accessKey, seed) = try juiceboxPinHash(
             pin: pin, registrationVersion: Self.version, mode: .fastInsecure)
-        let masterOPRF = Scalar52.random()
+        let masterOPRF = RistrettoScalar.random()
         let oprfShares = createShares(
             secret: masterOPRF, threshold: Self.threshold, count: Self.realmCount,
-            random: { Scalar52.random() })
+            random: { RistrettoScalar.random() })
         let oprfOutput = OPRF.unobliviousEvaluate(privateKey: masterOPRF, input: accessKey)
         let (unlockKey, unlockKeyCommitment) = JuiceboxKeys.unlockKeyAndCommitment(
             oprfOutput: oprfOutput)
 
-        let scalar = Scalar52.random()
+        let scalar = RistrettoScalar.random()
         let scalarShares = createShares(
             secret: scalar, threshold: Self.threshold, count: Self.realmCount,
-            random: { Scalar52.random() })
+            random: { RistrettoScalar.random() })
         let encryptionKey = JuiceboxKeys.userSecretEncryptionKey(
-            seed: seed, scalar: scalar.asBytes())
+            seed: seed, scalar: scalar.bytes)
         let encryptedSecret = JuiceboxKeys.encryptUserSecret(
             Self.userSecret, key: encryptionKey)!
 
@@ -189,7 +189,7 @@ final class RecoveryFlowTests: XCTestCase {
             let id = realmIds[index]
             let commitment = JuiceboxKeys.encryptedUserSecretCommitment(
                 unlockKey: unlockKey, realmId: id,
-                scalarShare: scalarShares[index].secret.asBytes(),
+                scalarShare: scalarShares[index].secret.bytes,
                 encryptedSecret: encryptedSecret)
             realms.append(FakeRealm(
                 id: id, url: "https://realm\(index + 1).test/req", token: tokens[hexString(id)]!,
@@ -218,14 +218,14 @@ final class RecoveryFlowTests: XCTestCase {
     // MARK: Tests
 
     func testRecoverUserSecret() async throws {
-        let (network, configuration, tokens) = makeNetwork()
+        let (network, configuration, tokens) = try makeNetwork()
         let recovery = JuiceboxRecovery(configuration: configuration, tokens: tokens)
         let secret = try await recovery.recover(pin: Self.pin, transport: network)
         XCTAssertEqual(secret, Self.userSecret)
     }
 
     func testRecoverWithOneRealmDown() async throws {
-        let (network, configuration, tokens) = makeNetwork()
+        let (network, configuration, tokens) = try makeNetwork()
         // Drop the second realm by pointing it at an unreachable address.
         let json = """
             {
@@ -246,7 +246,7 @@ final class RecoveryFlowTests: XCTestCase {
     }
 
     func testWrongPinReportsGuesses() async throws {
-        let (network, configuration, tokens) = makeNetwork()
+        let (network, configuration, tokens) = try makeNetwork()
         let recovery = JuiceboxRecovery(configuration: configuration, tokens: tokens)
         do {
             _ = try await recovery.recover(pin: Array("0000".utf8), transport: network)
@@ -257,7 +257,7 @@ final class RecoveryFlowTests: XCTestCase {
     }
 
     func testMissingTokenIsInvalidAuth() async throws {
-        let (network, configuration, _) = makeNetwork()
+        let (network, configuration, _) = try makeNetwork()
         let recovery = JuiceboxRecovery(configuration: configuration, tokens: [:])
         do {
             _ = try await recovery.recover(pin: Self.pin, transport: network)
@@ -268,7 +268,7 @@ final class RecoveryFlowTests: XCTestCase {
     }
 
     func testTooFewRealmsIsTransientOrNotRegistered() async throws {
-        let (network, configuration, tokens) = makeNetwork()
+        let (network, configuration, tokens) = try makeNetwork()
         let json = """
             {
               "realms": [

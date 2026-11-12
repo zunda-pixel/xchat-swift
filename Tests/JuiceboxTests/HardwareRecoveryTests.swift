@@ -134,8 +134,8 @@ final class HardwareRecoveryTests: XCTestCase {
         let id: [UInt8]
         let address: String
         let token: String
-        let oprfShare: Scalar52
-        let scalarShare: Scalar52
+        let oprfShare: RistrettoScalar
+        let scalarShare: RistrettoScalar
         let encryptedSecret: [UInt8]
         let secretCommitment: [UInt8]
         let unlockKeyCommitment: [UInt8]
@@ -290,8 +290,8 @@ final class HardwareRecoveryTests: XCTestCase {
                             key: .text("oprf_blinded_result"),
                             value: .bytes(blindedOutput.compressed)),
                         CBORPair(key: .text("oprf_proof"), value: .map([
-                            CBORPair(key: .text("c"), value: .bytes(proof.c.asBytes())),
-                            CBORPair(key: .text("beta_z"), value: .bytes(proof.betaZ.asBytes())),
+                            CBORPair(key: .text("c"), value: .bytes(proof.c.bytes)),
+                            CBORPair(key: .text("beta_z"), value: .bytes(proof.betaZ.bytes)),
                         ])),
                         CBORPair(
                             key: .text("unlock_key_commitment"),
@@ -320,7 +320,7 @@ final class HardwareRecoveryTests: XCTestCase {
                     CBORPair(key: .text("Ok"), value: .map([
                         CBORPair(
                             key: .text("encryption_key_scalar_share"),
-                            value: .bytes(realm.scalarShare.asBytes())),
+                            value: .bytes(realm.scalarShare.bytes)),
                         CBORPair(
                             key: .text("encrypted_secret"),
                             value: .bytes(realm.encryptedSecret)),
@@ -347,19 +347,19 @@ final class HardwareRecoveryTests: XCTestCase {
         let tokens = Dictionary(
             uniqueKeysWithValues: realmIds.map { (hexString($0), "token-\(hexString($0))") })
 
-        let (accessKey, seed) = juiceboxPinHash(
+        let (accessKey, seed) = try juiceboxPinHash(
             pin: Self.pin, registrationVersion: Self.version, mode: .fastInsecure)
-        let masterOPRF = Scalar52.random()
+        let masterOPRF = RistrettoScalar.random()
         let oprfShares = createShares(
-            secret: masterOPRF, threshold: 2, count: 3, random: { Scalar52.random() })
+            secret: masterOPRF, threshold: 2, count: 3, random: { RistrettoScalar.random() })
         let oprfOutput = OPRF.unobliviousEvaluate(privateKey: masterOPRF, input: accessKey)
         let (unlockKey, unlockCommitment) = JuiceboxKeys.unlockKeyAndCommitment(
             oprfOutput: oprfOutput)
-        let scalar = Scalar52.random()
+        let scalar = RistrettoScalar.random()
         let scalarShares = createShares(
-            secret: scalar, threshold: 2, count: 3, random: { Scalar52.random() })
+            secret: scalar, threshold: 2, count: 3, random: { RistrettoScalar.random() })
         let encryptionKey = JuiceboxKeys.userSecretEncryptionKey(
-            seed: seed, scalar: scalar.asBytes())
+            seed: seed, scalar: scalar.bytes)
         let encryptedSecret = JuiceboxKeys.encryptUserSecret(Self.secret, key: encryptionKey)!
 
         var realms: [RealmFixture] = []
@@ -367,7 +367,7 @@ final class HardwareRecoveryTests: XCTestCase {
             let id = realmIds[index]
             let commitment = JuiceboxKeys.encryptedUserSecretCommitment(
                 unlockKey: unlockKey, realmId: id,
-                scalarShare: scalarShares[index].secret.asBytes(),
+                scalarShare: scalarShares[index].secret.bytes,
                 encryptedSecret: encryptedSecret)
             realms.append(RealmFixture(
                 id: id, address: "https://realm\(index + 1).test/",
@@ -405,19 +405,19 @@ final class HardwareRecoveryTests: XCTestCase {
         let realmIds = (0..<2).map { [UInt8](repeating: UInt8($0 + 1), count: 16) }
         let tokens = Dictionary(
             uniqueKeysWithValues: realmIds.map { (hexString($0), "token-\(hexString($0))") })
-        let (accessKey, seed) = juiceboxPinHash(
+        let (accessKey, seed) = try juiceboxPinHash(
             pin: Self.pin, registrationVersion: Self.version, mode: .fastInsecure)
-        let masterOPRF = Scalar52.random()
+        let masterOPRF = RistrettoScalar.random()
         let oprfShares = createShares(
-            secret: masterOPRF, threshold: 2, count: 2, random: { Scalar52.random() })
+            secret: masterOPRF, threshold: 2, count: 2, random: { RistrettoScalar.random() })
         let oprfOutput = OPRF.unobliviousEvaluate(privateKey: masterOPRF, input: accessKey)
         let (unlockKey, unlockCommitment) = JuiceboxKeys.unlockKeyAndCommitment(
             oprfOutput: oprfOutput)
-        let scalar = Scalar52.random()
+        let scalar = RistrettoScalar.random()
         let scalarShares = createShares(
-            secret: scalar, threshold: 2, count: 2, random: { Scalar52.random() })
+            secret: scalar, threshold: 2, count: 2, random: { RistrettoScalar.random() })
         let encryptionKey = JuiceboxKeys.userSecretEncryptionKey(
-            seed: seed, scalar: scalar.asBytes())
+            seed: seed, scalar: scalar.bytes)
         let encryptedSecret = JuiceboxKeys.encryptUserSecret(Self.secret, key: encryptionKey)!
 
         var realms: [RealmFixture] = []
@@ -429,7 +429,7 @@ final class HardwareRecoveryTests: XCTestCase {
                 scalarShare: scalarShares[index].secret, encryptedSecret: encryptedSecret,
                 secretCommitment: JuiceboxKeys.encryptedUserSecretCommitment(
                     unlockKey: unlockKey, realmId: id,
-                    scalarShare: scalarShares[index].secret.asBytes(),
+                    scalarShare: scalarShares[index].secret.bytes,
                     encryptedSecret: encryptedSecret),
                 unlockKeyCommitment: unlockCommitment, unlockKey: unlockKey,
                 numGuesses: 5, guessCount: 1,

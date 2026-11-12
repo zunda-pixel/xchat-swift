@@ -10,20 +10,17 @@ the target does the cryptography, mirroring the SDK's no-networking rule.
 
 ## Implemented
 
-- `Blake2s` (RFC 7693), keyed BLAKE2s for the Juicebox MACs,
-  `hmacBlake2s`, `hkdfBlake2s`.
+- BlakeHash provides BLAKE2s (RFC 7693) and keyed BLAKE2s for the Juicebox
+  MACs. Noise composes HMAC and HKDF with BLAKE2s.
 - `NoiseNK`: the client side of `Noise_NK_25519_ChaChaPoly_BLAKE2s`, the
   channel Juicebox hardware realms speak (handshake plus transport),
   built on swift-crypto's X25519 and ChaChaPoly.
-- `Blake2b`, Argon2's `H'` (`blake2bLong`), and `Argon2id` (version 19),
-  with `juiceboxPinHash` implementing `Standard2019`: Argon2id with
-  `m = 16384`, `t = 32`, `p = 1`, and the length-prefixed salt, split into
-  the OPRF access key and the user-secret encryption seed. `FastInsecure`
-  uses the minimum Argon2 parameters for test realms.
-- `FieldElement51`, `Scalar52`, `EdwardsPoint`, and `RistrettoPoint`,
-  hand-ported from curve25519-dalek 4.1.3: the field and scalar arithmetic,
-  Edwards addition and doubling, the canonical Ristretto encoding and
-  one-way map, and constant-time scalar multiplication.
+- The PHC Argon2 reference implementation provides Argon2id (version 19).
+  `juiceboxPinHash` uses `Standard2019` with `m = 16384`, `t = 32`, `p = 1`,
+  and the length-prefixed salt. It splits the output into the OPRF access
+  key and the user-secret encryption seed. `FastInsecure` is for test realms.
+- libsodium provides Ristretto255 point and scalar arithmetic, point
+  validation, the one-way map, and constant-time comparisons.
 - `OPRF`: `start` / `finalize` / `unobliviousEvaluate`, the DLEQ proof
   verification and generation, and the server-side evaluation used by
   tests.
@@ -39,7 +36,7 @@ the target does the cryptography, mirroring the SDK's no-networking rule.
 - `JuiceboxKeys`: the unlock key and commitments, the keyed-BLAKE2s
   user-secret encryption key, and the padded ChaCha20-Poly1305 secret.
 
-Tests: RFC 7693 and RFC 9106 vectors, the reference PIN vector, official
+Tests: RFC 7693 vectors, the reference PIN vector, official
 Noise NK vectors (`Tests/JuiceboxTests/Fixtures/noise_nk_vectors.json`),
 RFC 9496 Ristretto vectors (multiples, invalid encodings, uniform bytes),
 the reference secret-encryption vector, and end-to-end recovery against
@@ -86,11 +83,7 @@ scalars, Lagrange interpolation with the secret as the constant term.
 
 ## Remaining
 
-1. **Tweetbot**: replace `XChatKeyRecovery` with `JuiceboxRecovery`, supply
-   an HTTP transport, and remove chat-xdk.
-2. **Registration / deletion**: only recovery is ported. The app registers
-   keys through chat-xdk today; if that is needed without Rust, the same
-   building blocks cover `Register1` / `Register2` and `Delete`.
-3. **Session reuse**: the driver opens a new Noise session per request,
-   which is correct but costs an extra round trip for phases 2 and 3.
-   Reusing sessions would match the reference client's latency.
+1. **Registration / deletion**: this module supports recovery. The
+   registration and deletion RPCs are separate protocol paths.
+2. **Session reuse**: the driver opens a new Noise session per request.
+   Reusing sessions would save a round trip for phases 2 and 3.

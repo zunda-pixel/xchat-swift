@@ -1,4 +1,5 @@
 import Crypto
+import _Clibsodium
 
 /// A request the recovery driver asks the host app to perform. The SDK owns
 /// the Juicebox protocol, not the HTTP stack.
@@ -92,6 +93,7 @@ public struct JuiceboxRecovery: Sendable {
     public func recover(
         pin: [UInt8], transport: any JuiceboxHTTPTransport
     ) async throws -> [UInt8] {
+        guard sodium_init() >= 0 else { throw JuiceboxRecoveryError.assertion }
         let threshold = configuration.recoverThreshold
 
         // Phase 1: every realm reports the registration version.
@@ -126,7 +128,7 @@ public struct JuiceboxRecovery: Sendable {
 
         // Phase 2: evaluate the OPRF across realms and recover the blinded
         // result.
-        let (accessKey, encryptionKeySeed) = juiceboxPinHash(
+        let (accessKey, encryptionKeySeed) = try juiceboxPinHash(
             pin: pin, registrationVersion: version, userInfo: userInfo,
             mode: configuration.pinHashingMode)
         let (blindingFactor, blindedInput) = OPRF.start(input: accessKey)
@@ -198,7 +200,7 @@ public struct JuiceboxRecovery: Sendable {
 
         // Phase 3: exchange the unlock key tag for each realm's scalar share,
         // then decrypt the user secret.
-        var scalarShares: [(share: SecretShare<Scalar52>, encryptedSecret: [UInt8])] = []
+        var scalarShares: [(share: SecretShare<RistrettoScalar>, encryptedSecret: [UInt8])] = []
         for realm in realms {
             let tag = JuiceboxKeys.unlockKeyTag(unlockKey: unlockKey, realmId: realm.id)
             do {
@@ -241,14 +243,14 @@ public struct JuiceboxRecovery: Sendable {
             throw JuiceboxRecoveryError.assertion
         }
 
-        let scalar: Scalar52
+        let scalar: RistrettoScalar
         do {
             scalar = try recoverSecret(secretGroup.value.map { $0.share })
         } catch {
             throw JuiceboxRecoveryError.assertion
         }
         let encryptionKey = JuiceboxKeys.userSecretEncryptionKey(
-            seed: encryptionKeySeed, scalar: scalar.asBytes())
+            seed: encryptionKeySeed, scalar: scalar.bytes)
         guard let secret = JuiceboxKeys.decryptUserSecret(
             secretGroup.key, key: encryptionKey)
         else { throw JuiceboxRecoveryError.assertion }
@@ -447,11 +449,8 @@ public struct JuiceboxRecovery: Sendable {
         return key.isValidSignature(signed.signature, for: message)
     }
 
-    private func canonicalScalar(_ bytes: [UInt8]) -> Scalar52? {
-        guard bytes.count == 32 else { return nil }
-        let scalar = Scalar52.fromBytes(bytes)
-        guard scalar.asBytes() == bytes else { return nil }
-        return scalar
+    private func canonicalScalar(_ bytes: [UInt8]) -> RistrettoScalar? {
+        RistrettoScalar(canonicalBytes: bytes)
     }
 }
 
@@ -462,11 +461,7 @@ private struct PointShareKey: Hashable {
 
 private func constantTimeEquals(_ lhs: [UInt8], _ rhs: [UInt8]) -> Bool {
     guard lhs.count == rhs.count else { return false }
-    var difference: UInt8 = 0
-    for i in 0..<lhs.count {
-        difference |= lhs[i] ^ rhs[i]
-    }
-    return difference == 0
+    return unsafe sodium_memcmp(lhs, rhs, lhs.count) == 0
 }
 
 extension SecretsRequest {

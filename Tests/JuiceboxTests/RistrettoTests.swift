@@ -26,12 +26,12 @@ final class RistrettoTests: XCTestCase {
         return String(decoding: chars, as: UTF8.self)
     }
 
-    private static func scalar(_ value: UInt64) -> Scalar52 {
+    private static func scalar(_ value: UInt64) -> RistrettoScalar {
         var bytes = [UInt8](repeating: 0, count: 32)
         for i in 0..<8 {
             bytes[i] = UInt8(truncatingIfNeeded: value >> (8 * UInt64(i)))
         }
-        return Scalar52.fromBytes(bytes)
+        return RistrettoScalar(canonicalBytes: bytes)!
     }
 
     private static let multiples = [
@@ -52,15 +52,6 @@ final class RistrettoTests: XCTestCase {
         "46376b80f409b29dc2b5f6f0c52591990896e5716f41477cd30085ab7f10301e",
         "e0c418f7c8d9c4cdd7395b93ea124f3ad99021bb681dfc3302a9d99a2e53e64e",
     ]
-
-    func testEdwardsBasepointEncoding() {
-        XCTAssertEqual(
-            Self.hexString(EdwardsPoint.basepoint.compress()),
-            "5866666666666666666666666666666666666666666666666666666666666666")
-        XCTAssertEqual(
-            EdwardsPoint.decompress(EdwardsPoint.basepoint.compress())?.compress(),
-            EdwardsPoint.basepoint.compress())
-    }
 
     /// B[i] is the encoding of i times the generator, and each is also the
     /// previous point plus the generator.
@@ -95,6 +86,7 @@ final class RistrettoTests: XCTestCase {
     /// Every encoding the RFC lists must be rejected.
     func testInvalidEncodings() {
         let invalid = [
+            "e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2df6",
             "00ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
             "f3ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
@@ -199,7 +191,7 @@ final class RistrettoTests: XCTestCase {
     /// `2P = P + P`, and scalar multiplication is additive.
     func testDoubleAndScalarArithmetic() {
         let point = RistrettoPoint.hashToGroup(Array("juicebox oprf test".utf8))
-        XCTAssertEqual(point.double(), point + point)
+        XCTAssertEqual(point.scalarMultiply(Self.scalar(2)), point + point)
         XCTAssertEqual(
             point.scalarMultiply(Self.scalar(3)),
             point.scalarMultiply(Self.scalar(2)) + point)

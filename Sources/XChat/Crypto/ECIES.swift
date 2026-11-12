@@ -67,12 +67,11 @@ func encryptWithPublicKey(publicKey: [UInt8], data: [UInt8]) throws -> [UInt8] {
     let ephemeralPublicBytes = Array(ephemeral.publicKey.x963Representation)
     let shared = try ephemeral.sharedSecretFromKeyAgreement(with: recipient)
 
-    let derived = kdf2SHA256(
-        sharedSecret: unsafe shared.withUnsafeBytes { unsafe Array($0) },
-        sharedInfo: ephemeralPublicBytes,
-        length: 32)
+    let material = shared.x963DerivedSymmetricKey(
+        using: SHA256.self, sharedInfo: ephemeralPublicBytes, outputByteCount: 32)
+    let derived = unsafe material.withUnsafeBytes { unsafe Array($0) }
     let cipher = AES128GCM(key: Array(derived[0..<16]))
-    let sealed = cipher.seal(nonce: Array(derived[16..<32]), plaintext: data)
+    let sealed = try cipher.seal(nonce: Array(derived[16..<32]), plaintext: data)
     return ephemeralPublicBytes + sealed
 }
 
@@ -94,10 +93,9 @@ func decryptWithPrivateKey(privateKey: [UInt8], data: [UInt8]) throws -> [UInt8]
     let secret = try parsePrivateKey(privateKey)
     let shared = try secret.sharedSecretFromKeyAgreement(with: ephemeral)
 
-    let derived = kdf2SHA256(
-        sharedSecret: unsafe shared.withUnsafeBytes { unsafe Array($0) },
-        sharedInfo: ephemeralPublicBytes,
-        length: 32)
+    let material = shared.x963DerivedSymmetricKey(
+        using: SHA256.self, sharedInfo: ephemeralPublicBytes, outputByteCount: 32)
+    let derived = unsafe material.withUnsafeBytes { unsafe Array($0) }
     let cipher = AES128GCM(key: Array(derived[0..<16]))
     do {
         return try cipher.open(

@@ -146,8 +146,9 @@ private struct CBORCursor {
             depth -= 1
             return .map(pairs)
         case 6:
-            // Tag: read and ignore, then read the tagged value.
             _ = try readLength(additional)
+            depth += 1
+            defer { depth -= 1 }
             return try readValue()
         case 7:
             switch additional {
@@ -234,4 +235,13 @@ extension CBORValue {
 /// Big-endian 64-bit bytes for CBOR integer heads.
 func be64(_ value: UInt64) -> [UInt8] {
     (0..<8).reversed().map { UInt8(truncatingIfNeeded: value >> (8 * UInt64($0))) }
+}
+
+func be32(_ value: UInt32) -> [UInt8] {
+    [
+        UInt8(truncatingIfNeeded: value >> 24),
+        UInt8(truncatingIfNeeded: value >> 16),
+        UInt8(truncatingIfNeeded: value >> 8),
+        UInt8(truncatingIfNeeded: value),
+    ]
 }

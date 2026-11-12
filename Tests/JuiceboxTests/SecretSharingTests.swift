@@ -6,12 +6,12 @@ import XCTest
 /// duplicate handling.
 final class SecretSharingTests: XCTestCase {
     func testScalarSharesRoundTrip() throws {
-        let secret = Scalar52.random()
+        let secret = RistrettoScalar.random()
         for count in 2...5 {
             for threshold in 2...count {
                 let shares = createShares(
                     secret: secret, threshold: threshold, count: count,
-                    random: { Scalar52.random() })
+                    random: { RistrettoScalar.random() })
                 XCTAssertEqual(shares.count, count)
                 XCTAssertTrue(shares.allSatisfy { $0.secret != secret })
 
@@ -42,14 +42,14 @@ final class SecretSharingTests: XCTestCase {
     }
 
     func testDuplicateIndicesFail() {
-        let share = SecretShare(index: 1, secret: Scalar52.random())
+        let share = SecretShare(index: 1, secret: RistrettoScalar.random())
         XCTAssertThrowsError(try recoverSecret([share, share])) { error in
             XCTAssertEqual(error as? SecretSharingError, .duplicateShares)
         }
     }
 
     func testSingleShareAtZero() throws {
-        let value = Scalar52.random()
+        let value = RistrettoScalar.random()
         let share = SecretShare(index: 1, secret: value)
         XCTAssertEqual(try recoverSecret([share]), value)
     }
