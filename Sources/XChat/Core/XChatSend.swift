@@ -40,6 +40,7 @@ extension XChatCore {
   /// The original event (`DecryptedEvent.originalB64` from decryption) is
   /// embedded in the preview so recipients can validate it, and a v1
   /// original's message key travels with it so they can decrypt it.
+  /// Supply historical keys by version in `replyToConversationKeys` when quoting older messages.
   public func encryptReply(
     text: String,
     replyToEventB64: String,
@@ -52,7 +53,8 @@ extension XChatCore {
     quickReply: QuickReplyInfo? = nil,
     shouldNotify: Bool? = nil,
     ttlMilliseconds: Int64? = nil,
-    replyToAttachmentId: String? = nil
+    replyToAttachmentId: String? = nil,
+    replyToConversationKeys: [String: [UInt8]] = [:]
   ) throws -> EncryptedMessagePayload {
     let version = sendVersion
     let messageId = try outgoingMessageId(
@@ -61,9 +63,11 @@ extension XChatCore {
       conversationId: conversationId, attachments: attachments)
     let reply = try buildReplyPreview(
       replyToEventB64: replyToEventB64,
+      conversationId: canonicalConversationId(conversationId, senderId: senderId),
       conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion,
-      replyToAttachmentId: replyToAttachmentId)
+      replyToAttachmentId: replyToAttachmentId,
+      replyToConversationKeys: replyToConversationKeys)
     let content = try buildMessageContent(
       text: text, entities: entities, attachments: attachments,
       quickReply: quickReply, messageId: messageId, version: version,
@@ -289,7 +293,8 @@ extension XChatCore {
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       messageId: messageId, version: sendVersion,
       shouldNotify: shouldNotify, ttlMilliseconds: nil,
-      embeddedSigners: embeddedSigners)
+      embeddedSigners: embeddedSigners
+    )
   }
 
   private func encryptAndSign(
@@ -654,13 +659,18 @@ extension XChatCore {
   /// original's key) so recipients can validate it.
   private func buildReplyPreview(
     replyToEventB64: String,
+    conversationId: String,
     conversationKey: [UInt8],
     conversationKeyVersion: String,
-    replyToAttachmentId: String?
+    replyToAttachmentId: String?,
+    replyToConversationKeys: [String: [UInt8]]
   ) throws -> (
     preview: ReplyingToPreview, signers: [(senderId: String, publicKeyVersion: String)]
   ) {
     let raw = try parseEvent(replyToEventB64)
+    guard raw.conversationId == conversationId else {
+      throw XChatError.invalidInput("the reply target belongs to a different conversation")
+    }
     guard case .messageCreate(let create)? = raw.detail, let contents = create.contents else {
       throw XChatError.invalidInput("the reply target is not a message event")
     }
@@ -669,7 +679,8 @@ extension XChatCore {
     }
     let key = try quotedContentsKey(
       raw, conversationKey: conversationKey,
-      conversationKeyVersion: conversationKeyVersion)
+      conversationKeyVersion: conversationKeyVersion,
+      replyToConversationKeys: replyToConversationKeys)
     let plaintext: [UInt8]
     if let key {
       plaintext = try decryptMessage(key: key, ciphertext: contents)
@@ -710,29 +721,30 @@ extension XChatCore {
     return (preview, signers)
   }
 
-  /// The key a quoted message's contents use: its conversation key when
-  /// the versions match, or a key derived from it when the message uses a
-  /// per-message key; nil for an unencrypted original.
+  /// Resolves the key for the quoted message, or returns nil for unencrypted contents.
   private func quotedContentsKey(
     _ raw: MessageEvent,
     conversationKey: [UInt8],
-    conversationKeyVersion: String
+    conversationKeyVersion: String,
+    replyToConversationKeys: [String: [UInt8]]
   ) throws -> [UInt8]? {
     guard case .messageCreate(let create)? = raw.detail,
       let version = create.conversationKeyVersion
     else { return nil }
+    let quotedKey =
+      version == conversationKeyVersion
+      ? conversationKey : replyToConversationKeys[version]
+    guard let quotedKey else {
+      throw XChatError.decryption(
+        "missing conversation key version '\(version)' for the reply target")
+    }
     if usesMessageKey(raw) {
       return try deriveMessageKey(
-        conversationKey: conversationKey,
+        conversationKey: quotedKey,
         senderId: raw.senderId ?? "",
         messageId: raw.messageId ?? "")
     }
-    guard version == conversationKeyVersion else {
-      throw XChatError.decryption(
-        "the reply target is encrypted with conversation key version '\(version)', "
-          + "not '\(conversationKeyVersion)'")
-    }
-    return conversationKey
+    return quotedKey
   }
 
   /// The version a new key change in `conversationId` signs at: the send

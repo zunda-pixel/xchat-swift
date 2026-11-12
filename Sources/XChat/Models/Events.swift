@@ -186,6 +186,10 @@ public struct QuickReplyInfo: Sendable, Equatable {
   }
 
   public var content: Content
+
+  public init(content: Content) {
+    self.content = content
+  }
 }
 
 public struct QuickReplyOptionInfo: Sendable, Equatable {
@@ -193,6 +197,16 @@ public struct QuickReplyOptionInfo: Sendable, Equatable {
   public var label: String?
   public var metadata: String?
   public var optionDescription: String?
+
+  public init(
+    id: String? = nil, label: String? = nil, metadata: String? = nil,
+    optionDescription: String? = nil
+  ) {
+    self.id = id
+    self.label = label
+    self.metadata = metadata
+    self.optionDescription = optionDescription
+  }
 }
 
 public struct CallToActionInfo: Sendable, Equatable {
