@@ -278,14 +278,18 @@ public struct JuiceboxRecovery: Sendable {
                 ],
                 body: request.encoded()),
             transport: transport)
-        guard (200..<300).contains(response.statusCode) else {
-            throw statusError(response.statusCode)
+        if (200..<300).contains(response.statusCode) {
+            guard let decoded = try? SecretsResponse.decode(response.body) else {
+                throw JuiceboxRecoveryError.assertion
+            }
+            return decoded
         }
-        do {
-            return try SecretsResponse.decode(response.body)
-        } catch {
-            throw JuiceboxRecoveryError.assertion
+        // A realm may describe an error in the body along with a non-2xx
+        // status; prefer the body when it parses.
+        if let decoded = try? SecretsResponse.decode(response.body) {
+            return decoded
         }
+        throw statusError(response.statusCode)
     }
 
     private func hardwareRequest(
@@ -364,14 +368,16 @@ public struct JuiceboxRecovery: Sendable {
                 headers: ["X-Juicebox-Version": Self.juiceboxVersion],
                 body: request.encoded()),
             transport: transport)
-        guard (200..<300).contains(response.statusCode) else {
-            throw statusError(response.statusCode)
+        if (200..<300).contains(response.statusCode) {
+            guard let decoded = try? ClientResponse.decode(response.body) else {
+                throw JuiceboxRecoveryError.assertion
+            }
+            return decoded
         }
-        do {
-            return try ClientResponse.decode(response.body)
-        } catch {
-            throw JuiceboxRecoveryError.assertion
+        if let decoded = try? ClientResponse.decode(response.body) {
+            return decoded
         }
+        throw statusError(response.statusCode)
     }
 
     private func send(
