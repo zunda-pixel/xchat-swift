@@ -14,9 +14,13 @@ the target does the cryptography, mirroring the SDK's no-networking rule.
 - `NoiseNK`: the client side of `Noise_NK_25519_ChaChaPoly_BLAKE2s`, the
   channel Juicebox hardware realms speak (handshake plus transport),
   built on swift-crypto's X25519 and ChaChaPoly.
-- Tests: BLAKE2s RFC vectors; Noise NK against the official Noise test
-  vectors (`Tests/JuiceboxTests/Fixtures/noise_nk_vectors.json`), checking
-  handshake messages and transport frames byte for byte.
+- `Blake2b`, Argon2's `H'` (`blake2bLong`), and `Argon2id` (version 19),
+  with `juiceboxPinHash` implementing `Standard2019`: Argon2id with
+  `m = 16384`, `t = 32`, `p = 1`, and the length-prefixed salt, split into
+  the OPRF access key and the user-secret encryption seed.
+- Tests: RFC 7693 and RFC 9106 vectors, the reference PIN vector, and the
+  official Noise NK vectors (`Tests/JuiceboxTests/Fixtures/noise_nk_vectors.json`),
+  checking handshake messages and transport frames byte for byte.
 
 ## Protocol (from `juicebox-sdk@0.3.7`)
 
@@ -55,15 +59,13 @@ scalars, Lagrange interpolation with the secret as the constant term.
 
 ## Remaining
 
-1. **Argon2id** with the reference parameters (RFC 9106 vectors, plus the
-   reference PIN vector).
-2. **Ristretto255 + Scalar** and the **OPRF with DLEQ**, with RFC 9496 and
+1. **Ristretto255 + Scalar** and the **OPRF with DLEQ**, with RFC 9496 and
    reference vectors. This is the largest piece; the dependency choice
    (hand-port vs. a vetted library) is open.
-3. **Secret sharing** and **marshalling**.
-4. **Realm API** request/response types, signed OPRF public keys, padded
+2. **Secret sharing** and **marshalling**.
+3. **Realm API** request/response types, signed OPRF public keys, padded
    responses.
-5. **Recovery driver**: the three phases, thresholds, retries, session
+4. **Recovery driver**: the three phases, thresholds, retries, session
    reuse, error mapping (`InvalidPin { guesses_remaining }`, …), with the
    app performing HTTP.
-6. **Tweetbot**: replace `XChatKeyRecovery` and remove chat-xdk.
+5. **Tweetbot**: replace `XChatKeyRecovery` and remove chat-xdk.
