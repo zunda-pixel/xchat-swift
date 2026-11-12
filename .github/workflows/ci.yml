@@ -23,4 +23,5 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends libsodium-dev pkg-config
-      - run: swift test
+      # swift-sodium emits a preprocessor warning for system libsodium (#3).
+      - run: swift test -Xcc -Wno-cpp

@@ -43,6 +43,10 @@ the reference secret-encryption vector, and end-to-end recovery against
 fake software and Noise hardware realms, including wrong PINs, missing
 tokens, and a realm outage.
 
+On Linux, install `libsodium-dev` and `pkg-config`, then run
+`swift test -Xcc -Wno-cpp`. The extra flag covers swift-sodium's
+system-library preprocessor warning ([#3](https://github.com/zunda-pixel/xchat-swift/issues/3)).
+
 ## Protocol (from `juicebox-sdk@0.3.7`)
 
 Three phases per realm, at most `recover_threshold` of `realms` needed:
