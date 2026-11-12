@@ -270,4 +270,15 @@ public struct SigningKeyEntry: Sendable, Equatable {
     public var identityPublicKey: String?
     /// Base64 signature of the identity key bytes by the signing key.
     public var identityPublicKeySignature: String?
+
+    public init(
+        userId: String, publicKeyVersion: String, publicKey: String,
+        identityPublicKey: String? = nil, identityPublicKeySignature: String? = nil
+    ) {
+        self.userId = userId
+        self.publicKeyVersion = publicKeyVersion
+        self.publicKey = publicKey
+        self.identityPublicKey = identityPublicKey
+        self.identityPublicKeySignature = identityPublicKeySignature
+    }
 }
