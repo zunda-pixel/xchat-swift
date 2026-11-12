@@ -24,12 +24,20 @@ struct Blake2s {
     private var buffer: [UInt8] = []
     private let outputLength: Int
 
-    init(outputLength: Int = 32) {
+    init(outputLength: Int = 32, key: [UInt8] = []) {
         precondition(outputLength >= 1 && outputLength <= 32, "BLAKE2s output is 1...32 bytes")
+        precondition(key.count <= 32, "BLAKE2s keys are at most 32 bytes")
         self.outputLength = outputLength
         var state = Self.iv
         state[0] ^= 0x0101_0000 ^ UInt32(outputLength)
+        // Keyed hashing sets the key length in the parameter block and hashes
+        // the key, padded to a block, before the message.
+        state[0] ^= UInt32(key.count) << 8
         h = state
+        if !key.isEmpty {
+            buffer.append(contentsOf: key)
+            buffer.append(contentsOf: [UInt8](repeating: 0, count: 64 - key.count))
+        }
     }
 
     mutating func update(_ data: [UInt8]) {
@@ -63,6 +71,14 @@ struct Blake2s {
     static func hash(_ data: [UInt8], outputLength: Int = 32) -> [UInt8] {
         var hasher = Blake2s(outputLength: outputLength)
         hasher.update(data)
+        return hasher.finalize()
+    }
+
+    /// Keyed BLAKE2s, the MAC Juicebox derives unlock keys and commitments
+    /// with.
+    static func mac(key: [UInt8], message: [UInt8], outputLength: Int = 32) -> [UInt8] {
+        var hasher = Blake2s(outputLength: outputLength, key: key)
+        hasher.update(message)
         return hasher.finalize()
     }
 

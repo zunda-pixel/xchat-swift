@@ -10,17 +10,41 @@ the target does the cryptography, mirroring the SDK's no-networking rule.
 
 ## Implemented
 
-- `Blake2s` (RFC 7693), `hmacBlake2s`, `hkdfBlake2s`.
+- `Blake2s` (RFC 7693), keyed BLAKE2s for the Juicebox MACs,
+  `hmacBlake2s`, `hkdfBlake2s`.
 - `NoiseNK`: the client side of `Noise_NK_25519_ChaChaPoly_BLAKE2s`, the
   channel Juicebox hardware realms speak (handshake plus transport),
   built on swift-crypto's X25519 and ChaChaPoly.
 - `Blake2b`, Argon2's `H'` (`blake2bLong`), and `Argon2id` (version 19),
   with `juiceboxPinHash` implementing `Standard2019`: Argon2id with
   `m = 16384`, `t = 32`, `p = 1`, and the length-prefixed salt, split into
-  the OPRF access key and the user-secret encryption seed.
-- Tests: RFC 7693 and RFC 9106 vectors, the reference PIN vector, and the
-  official Noise NK vectors (`Tests/JuiceboxTests/Fixtures/noise_nk_vectors.json`),
-  checking handshake messages and transport frames byte for byte.
+  the OPRF access key and the user-secret encryption seed. `FastInsecure`
+  uses the minimum Argon2 parameters for test realms.
+- `FieldElement51`, `Scalar52`, `EdwardsPoint`, and `RistrettoPoint`,
+  hand-ported from curve25519-dalek 4.1.3: the field and scalar arithmetic,
+  Edwards addition and doubling, the canonical Ristretto encoding and
+  one-way map, and constant-time scalar multiplication.
+- `OPRF`: `start` / `finalize` / `unobliviousEvaluate`, the DLEQ proof
+  verification and generation, and the server-side evaluation used by
+  tests.
+- `SecretSharing`: Shamir sharing and Lagrange recovery over scalars and
+  Ristretto points.
+- `CBOR` plus `RealmMessages`: the serde-compatible CBOR encoding of the
+  recovery requests and responses, the padded hardware envelope, and the
+  Noise `ClientRequest` / `ClientResponse` wrapper.
+- `JuiceboxConfiguration` (the X API `key_store_token_map_json` shape) and
+  `JuiceboxRecovery`, the three-phase driver. The app supplies a
+  `JuiceboxHTTPTransport`; the SDK builds every request and parses every
+  response, including the `X-Juicebox-Version` header and Bearer token.
+- `JuiceboxKeys`: the unlock key and commitments, the keyed-BLAKE2s
+  user-secret encryption key, and the padded ChaCha20-Poly1305 secret.
+
+Tests: RFC 7693 and RFC 9106 vectors, the reference PIN vector, official
+Noise NK vectors (`Tests/JuiceboxTests/Fixtures/noise_nk_vectors.json`),
+RFC 9496 Ristretto vectors (multiples, invalid encodings, uniform bytes),
+the reference secret-encryption vector, and end-to-end recovery against
+fake software and Noise hardware realms, including wrong PINs, missing
+tokens, and a realm outage.
 
 ## Protocol (from `juicebox-sdk@0.3.7`)
 
@@ -50,22 +74,23 @@ Three phases per realm, at most `recover_threshold` of `realms` needed:
    derive `encryption_key = HKDF(encryption_key_seed, scalar)` and decrypt
    the secret (the 64 private-key bytes).
 
-Wire format: software realms take JSON with `Authorization: Bearer <token>`;
-hardware realms (those with a `public_key`) take marshalled requests over
-Noise. The X Chat config carries realm public keys, so both paths matter.
+Wire format: the realm RPC endpoint is `<address>/req` taking a CBOR body.
+Software realms take a `SecretsRequest` directly with
+`Authorization: Bearer <token>`; hardware realms (those with a `public_key`)
+take a `ClientRequest` over Noise NK, and answer a `ClientResponse` whose
+payload is a padded `SecretsResponse`. Every request carries
+`X-Juicebox-Version: 0.3.7`.
 
 Secret sharing is Shamir over `Scalar`/`RistrettoPoint`, indices `1...n` as
 scalars, Lagrange interpolation with the secret as the constant term.
 
 ## Remaining
 
-1. **Ristretto255 + Scalar** and the **OPRF with DLEQ**, with RFC 9496 and
-   reference vectors. This is the largest piece; the dependency choice
-   (hand-port vs. a vetted library) is open.
-2. **Secret sharing** and **marshalling**.
-3. **Realm API** request/response types, signed OPRF public keys, padded
-   responses.
-4. **Recovery driver**: the three phases, thresholds, retries, session
-   reuse, error mapping (`InvalidPin { guesses_remaining }`, …), with the
-   app performing HTTP.
-5. **Tweetbot**: replace `XChatKeyRecovery` and remove chat-xdk.
+1. **Tweetbot**: replace `XChatKeyRecovery` with `JuiceboxRecovery`, supply
+   an HTTP transport, and remove chat-xdk.
+2. **Registration / deletion**: only recovery is ported. The app registers
+   keys through chat-xdk today; if that is needed without Rust, the same
+   building blocks cover `Register1` / `Register2` and `Delete`.
+3. **Session reuse**: the driver opens a new Noise session per request,
+   which is correct but costs an extra round trip for phases 2 and 3.
+   Reusing sessions would match the reference client's latency.
