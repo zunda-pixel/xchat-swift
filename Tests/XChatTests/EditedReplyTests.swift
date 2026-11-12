@@ -2,8 +2,16 @@ import Testing
 
 @testable import XChat
 
-@Test(arguments: [true, false])
-func v0ReplyPreviewBindsTheEditToTheOriginalSequenceId(matches: Bool) throws {
+enum EditedPreviewCase: CaseIterable {
+  case shortPrefix
+  case wrongSequence
+  case authenticPrefix
+  case authenticFullText
+  case forgedSuffix
+}
+
+@Test(arguments: EditedPreviewCase.allCases)
+func v0ReplyPreviewValidatesTheQuotedEdit(scenario: EditedPreviewCase) throws {
   let core = XChatCore()
   let privateKey = TestVectors.bytes("signing_private_b64")
   let key = TestVectors.bytes("conversation_key_b64")
@@ -15,16 +23,30 @@ func v0ReplyPreviewBindsTheEditToTheOriginalSequenceId(matches: Bool) throws {
   try core.importKeys(
     identityPrivateKey: TestVectors.bytes("identity_private_b64"),
     signingPrivateKey: privateKey, publicKeyVersion: version)
+  let prefix = String(repeating: "🙂", count: 70)
+  let text = prefix + " authentic suffix"
+  let claimedText: String
+  switch scenario {
+  case .shortPrefix:
+    claimedText = String(prefix.dropLast())
+  case .authenticPrefix:
+    claimedText = prefix
+  case .forgedSuffix:
+    claimedText = prefix + " forged suffix"
+  default:
+    claimedText = text
+  }
+
   let edit = try core.encryptEdit(
-    targetMessageSequenceId: matches ? sequenceId : sequenceId + "1",
-    updatedText: "edited",
+    targetMessageSequenceId: scenario == .wrongSequence ? sequenceId + "1" : sequenceId,
+    updatedText: text,
     targetMessageId: nil,
     conversationId: conversation,
     conversationKey: key,
     conversationKeyVersion: "1001",
     senderId: sender)
   let preview = ReplyingToPreview(
-    messageText: "edited", rawEventMessageCreate: original,
+    messageText: claimedText, rawEventMessageCreate: original,
     rawEventEditMessage: try core.parseEvent(edit.eventB64))
   var holder = MessageEntryHolder()
   holder.contents = .message(MessageContents(messageText: "reply", replyingToPreview: preview))
@@ -57,5 +79,6 @@ func v0ReplyPreviewBindsTheEditToTheOriginalSequenceId(matches: Bool) throws {
     Issue.record("Expected a reply message")
     return
   }
-  #expect(message.replyPreviewValidation == (matches ? .valid : .invalid))
+  let valid = scenario == .authenticPrefix || scenario == .authenticFullText
+  #expect(message.replyPreviewValidation == (valid ? .valid : .invalid))
 }

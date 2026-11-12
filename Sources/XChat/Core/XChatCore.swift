@@ -756,11 +756,13 @@ private func validateReplyPreview(
     edited = editContents
   }
 
-  let quotedText = edited?.updatedText ?? original.messageText
+  let quotedText = (edited?.updatedText ?? original.messageText ?? "").utf16
+  let claimedText = (preview.messageText ?? "").utf16
   let entitiesMatch = edited.map { $0.entities } ?? original.entities
-  // A preview carries only the start of the quoted text, so texts are
-  // compared on their first 140 UTF-16 code units; entities exactly.
-  guard previewText(preview.messageText) == previewText(quotedText),
+  // Require the protocol's preview prefix and authenticate every extra code
+  // unit a sender includes, since the API exposes the full claimed text.
+  guard claimedText.count >= quotedText.prefix(140).count,
+    quotedText.starts(with: claimedText),
     preview.entities == entitiesMatch
   else { return .invalid }
 
@@ -836,9 +838,4 @@ private func claimComparable(_ attachment: MessageAttachment) -> MessageAttachme
   case .unsupported:
     return nil
   }
-}
-
-/// The start of a preview's text it is compared on: 140 UTF-16 code units.
-private func previewText(_ text: String?) -> [UInt16] {
-  Array((text ?? "").utf16.prefix(140))
 }
