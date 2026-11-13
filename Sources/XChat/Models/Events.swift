@@ -158,10 +158,12 @@ public struct ReplyPreview: Sendable, Equatable {
   public var messageText: String?
   public var entities: [RichTextEntityInfo]?
   public var attachments: [AttachmentInfo]?
+  /// Always nil for decoded previews. Display names require a trusted profile lookup.
   public var senderDisplayName: String?
   /// Always nil for decoded previews because the source signature does not cover sequence IDs.
   public var messageSequenceId: String?
   public var messageId: String?
+  /// Always nil for decoded previews. The sender's attachment selection is unverified.
   public var attachmentId: String?
   /// Whether the preview embeds the signed source event, which is what
   /// lets a recipient validate it.

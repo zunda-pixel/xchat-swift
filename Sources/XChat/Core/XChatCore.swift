@@ -571,10 +571,10 @@ private func mapPreview(_ preview: ReplyingToPreview) -> ReplyPreview {
     messageText: preview.messageText,
     entities: preview.entities.map { $0.map(mapEntity) },
     attachments: preview.attachments?.compactMap(mapAttachment),
-    senderDisplayName: preview.senderDisplayName,
+    senderDisplayName: nil,
     messageSequenceId: nil,
     messageId: preview.messageId,
-    attachmentId: preview.attachmentId,
+    attachmentId: nil,
     embedsSourceEvent: preview.rawEventMessageCreate != nil)
 }
 
@@ -762,9 +762,10 @@ private func validateReplyPreview(
   else { return .invalid }
 
   if let claimedAttachments = preview.attachments {
-    let originalAttachments = (original.attachments ?? []).compactMap(claimComparable)
-    for attachment in claimedAttachments.compactMap(claimComparable) {
-      guard originalAttachments.contains(attachment) else { return .invalid }
+    let originalAttachments = original.attachments ?? []
+    for attachment in claimedAttachments where mapAttachment(attachment) != nil {
+      guard originalAttachments.contains(where: { matchesAttachmentClaim(attachment, $0) })
+      else { return .invalid }
     }
   }
   return .valid
@@ -820,17 +821,15 @@ private func parseMessageEdit(_ bytes: [UInt8]) -> MessageEdit? {
   return edit
 }
 
-/// An attachment in the form preview claims are compared in: kinds the SDK
-/// does not surface are left out, and a media attachment's plaintext hash is
-/// ignored, as it does not change which media is quoted.
-private func claimComparable(_ attachment: MessageAttachment) -> MessageAttachment? {
-  switch attachment {
-  case .media(var media):
-    media.plaintextSHA256 = nil
-    return .media(media)
-  case .post, .url, .unifiedCard, .money:
-    return attachment
-  case .unsupported:
-    return nil
+/// A preview may omit the digest, but any digest it supplies must match.
+private func matchesAttachmentClaim(
+  _ claim: MessageAttachment, _ original: MessageAttachment
+) -> Bool {
+  if case .media(let media) = claim, media.plaintextSHA256 == nil,
+    case .media(var sourceMedia) = original
+  {
+    sourceMedia.plaintextSHA256 = nil
+    return claim == .media(sourceMedia)
   }
+  return claim == original
 }
