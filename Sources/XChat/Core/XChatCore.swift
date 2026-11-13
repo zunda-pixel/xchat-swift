@@ -743,16 +743,11 @@ private func validateReplyPreview(
         edit, carriedKey: preview.rawEventEditMessageKey, keys: keys),
       let editContents = parseMessageEdit(editPlaintext)
     else { return .invalid }
-    // An edit quoted with a message-key original must name that original
-    // by its signed message id.
-    if usesMessageKey(raw) {
-      guard let editMessageId = editContents.messageId,
-        editMessageId == raw.messageId
-      else { return .invalid }
-    } else {
-      guard let sequenceId = raw.sequenceId, editContents.messageSequenceId == sequenceId
-      else { return .invalid }
-    }
+    // A v0 original's sequence ID is unsigned. Require the signed message ID
+    // of a message-key original to bind the edit to its target.
+    guard usesMessageKey(raw), let editMessageId = editContents.messageId,
+      editMessageId == raw.messageId
+    else { return .invalid }
     edited = editContents
   }
 

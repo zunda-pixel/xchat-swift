@@ -4,22 +4,20 @@ import Testing
 
 enum EditedPreviewCase: CaseIterable {
   case shortPrefix
-  case wrongSequence
+  case unsignedEditTarget
   case authenticPrefix
   case authenticFullText
   case forgedSuffix
 }
 
 @Test(arguments: EditedPreviewCase.allCases)
-func v0ReplyPreviewValidatesTheQuotedEdit(scenario: EditedPreviewCase) throws {
+func v0ReplyPreviewRequiresAuthenticatedTextAndEditTarget(scenario: EditedPreviewCase) throws {
   let core = XChatCore()
   let privateKey = TestVectors.bytes("signing_private_b64")
   let key = TestVectors.bytes("conversation_key_b64")
   let version = TestVectors.string("event_signing_key_version")
   let sender = TestVectors.string("event_sender_id")
   let conversation = TestVectors.string("event_conversation_id")
-  let original = try core.parseEvent(TestVectors.string("event_message_b64"))
-  let sequenceId = try #require(original.sequenceId)
   try core.importKeys(
     identityPrivateKey: TestVectors.bytes("identity_private_b64"),
     signingPrivateKey: privateKey, publicKeyVersion: version)
@@ -37,17 +35,20 @@ func v0ReplyPreviewValidatesTheQuotedEdit(scenario: EditedPreviewCase) throws {
     claimedText = text
   }
 
-  let edit = try core.encryptEdit(
-    targetMessageSequenceId: scenario == .wrongSequence ? sequenceId + "1" : sequenceId,
-    updatedText: text,
-    targetMessageId: nil,
-    conversationId: conversation,
-    conversationKey: key,
-    conversationKeyVersion: "1001",
-    senderId: sender)
-  let preview = ReplyingToPreview(
-    messageText: claimedText, rawEventMessageCreate: original,
-    rawEventEditMessage: try core.parseEvent(edit.eventB64))
+  let originalPayload = try core.encryptMessage(
+    text: text, conversationId: conversation, conversationKey: key,
+    conversationKeyVersion: "1001", senderId: sender)
+  var original = try core.parseEvent(originalPayload.eventB64)
+  original.sequenceId = "7"
+  var preview = ReplyingToPreview(
+    messageText: claimedText, rawEventMessageCreate: original)
+  if scenario == .unsignedEditTarget {
+    let edit = try core.encryptEdit(
+      targetMessageSequenceId: "7", updatedText: text, targetMessageId: nil,
+      conversationId: conversation, conversationKey: key,
+      conversationKeyVersion: "1001", senderId: sender)
+    preview.rawEventEditMessage = try core.parseEvent(edit.eventB64)
+  }
   var holder = MessageEntryHolder()
   holder.contents = .message(MessageContents(messageText: "reply", replyingToPreview: preview))
   var writer = ThriftWriter()
