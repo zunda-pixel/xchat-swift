@@ -65,3 +65,21 @@ import XChat
   #expect(message.replyPreviewValidation == .valid)
   #expect(content.replyingToPreview?.messageText == TestVectors.string("event_message_key_text"))
 }
+
+@Test(arguments: ["abc", "01", "-1", "9223372036854775808"])
+func importingAnInvalidKeyVersionPreservesLoadedKeys(version: String) throws {
+  let core = XChatCore()
+  let identity = TestVectors.bytes("identity_private_b64")
+  let signing = TestVectors.bytes("signing_private_b64")
+  try core.importKeys(
+    identityPrivateKey: identity, signingPrivateKey: signing, publicKeyVersion: "1")
+
+  let error = #expect(throws: XChatError.self) {
+    try core.importKeys(identityPrivateKey: signing, publicKeyVersion: version)
+  }
+  #expect(error?.kind == .invalidInput)
+  let keys = try core.exportKeys()
+  #expect(keys.identity == identity)
+  #expect(keys.signing == signing)
+  #expect(core.publicKeyVersion == "1")
+}

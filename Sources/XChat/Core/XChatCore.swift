@@ -57,6 +57,9 @@ public final class XChatCore {
     if let signingPrivateKey {
       _ = try parsePrivateKey(signingPrivateKey)
     }
+    if let publicKeyVersion {
+      try validatePublicKeyVersion(publicKeyVersion)
+    }
     self.identityPrivateKey = identityPrivateKey
     self.signingPrivateKey = signingPrivateKey
     self.keyVersion = publicKeyVersion
@@ -569,7 +572,7 @@ private func mapPreview(_ preview: ReplyingToPreview) -> ReplyPreview {
     entities: preview.entities.map { $0.map(mapEntity) },
     attachments: preview.attachments?.compactMap(mapAttachment),
     senderDisplayName: preview.senderDisplayName,
-    messageSequenceId: preview.messageSequenceId,
+    messageSequenceId: nil,
     messageId: preview.messageId,
     attachmentId: preview.attachmentId,
     embedsSourceEvent: preview.rawEventMessageCreate != nil)
@@ -719,9 +722,6 @@ private func validateReplyPreview(
 
   if let claimedSender = preview.senderId {
     guard raw.senderId == String(claimedSender) else { return .invalid }
-  }
-  if let claimedSequence = preview.messageSequenceId {
-    guard raw.sequenceId == claimedSequence else { return .invalid }
   }
   if let claimedId = preview.messageId {
     guard raw.messageId == claimedId else { return .invalid }

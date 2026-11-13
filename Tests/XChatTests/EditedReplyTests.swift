@@ -41,7 +41,8 @@ func v0ReplyPreviewRequiresAuthenticatedTextAndEditTarget(scenario: EditedPrevie
   var original = try core.parseEvent(originalPayload.eventB64)
   original.sequenceId = "7"
   var preview = ReplyingToPreview(
-    messageText: claimedText, rawEventMessageCreate: original)
+    messageText: claimedText, messageSequenceId: original.sequenceId,
+    rawEventMessageCreate: original)
   if scenario == .unsignedEditTarget {
     let edit = try core.encryptEdit(
       targetMessageSequenceId: "7", updatedText: text, targetMessageId: nil,
@@ -76,10 +77,12 @@ func v0ReplyPreviewRequiresAuthenticatedTextAndEditTarget(scenario: EditedPrevie
         userId: sender, publicKeyVersion: version,
         publicKey: TestVectors.string("signing_public_b64"))
     ])
-  guard case .message(let message) = result else {
+  guard case .message(let message) = result, case .text(let content) = message.content else {
     Issue.record("Expected a reply message")
     return
   }
+  let decodedPreview = try #require(content.replyingToPreview)
+  #expect(decodedPreview.messageSequenceId == nil)
   let valid = scenario == .authenticPrefix || scenario == .authenticFullText
   #expect(message.replyPreviewValidation == (valid ? .valid : .invalid))
 }

@@ -159,6 +159,7 @@ public struct ReplyPreview: Sendable, Equatable {
   public var entities: [RichTextEntityInfo]?
   public var attachments: [AttachmentInfo]?
   public var senderDisplayName: String?
+  /// Always nil for decoded previews because the source signature does not cover sequence IDs.
   public var messageSequenceId: String?
   public var messageId: String?
   public var attachmentId: String?
