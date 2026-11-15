@@ -21,9 +21,11 @@ func usesMessageKey(_ contentsEncryptionVersion: Int?) -> Bool {
 
 /// Derives a message's 32-byte key from its conversation key, sender, and
 /// message id. The HKDF info is `<sender id>:<message id>` with the sender
-/// id in canonical decimal form, so a sender id that is not an integer has
-/// no message key: the result is nil, and the caller reports it with the
-/// message it was deriving for.
+/// id in canonical decimal form, so a signed or zero-padded id derives the
+/// same key as its canonical form, and an id `Int64(_:)` does not parse
+/// (anything but decimal digits after an optional sign, or a value out of
+/// range) has no message key: the result is nil, and the caller reports
+/// it with the message it was deriving for.
 func deriveMessageKey(
   conversationKey: [UInt8],
   senderId: String,

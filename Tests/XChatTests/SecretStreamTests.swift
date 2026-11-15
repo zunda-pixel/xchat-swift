@@ -171,7 +171,7 @@ final class SecretStreamTests: XCTestCase {
   }
 
   /// libsodium authenticates any tag byte a sender writes; a frame whose tag
-  /// the format does not define is refused without advancing the stream.
+  /// secretstream does not define is refused without advancing the stream.
   func testUndefinedTagRejected() throws {
     let key = TestVectors.bytes("conversation_key_b64")
     let (header, pusher) = try SecretStreamPush.start(key: key)

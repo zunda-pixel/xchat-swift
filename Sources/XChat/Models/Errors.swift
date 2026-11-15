@@ -21,8 +21,13 @@ public enum ErrorKind: String, Sendable {
 /// involved, so callers tell failures apart by matching cases.
 ///
 /// Later versions add cases as the SDK learns to tell more failures apart,
-/// at every level of nesting. Match the cases you handle and keep a
-/// `default` for the rest, which `description` describes.
+/// at every level of nesting. Match the cases you handle and leave the
+/// rest to `default`, which `description` describes. A switch that lists
+/// every case ends with `@unknown default` instead: the package is built
+/// without library evolution, so the compiler warns that a `default`
+/// after every case will never be executed, while `@unknown default`
+/// compiles cleanly and turns a case a later version adds into a warning
+/// rather than an error.
 public enum XChatError: Error, Sendable, Hashable {
   /// A parameter is missing or invalid.
   case invalidInput(InputFailure)
@@ -302,8 +307,10 @@ extension XChatError {
     /// The keys of a message with per-message keys derive from its event's
     /// sender id and message id, and the event lacks one it needs.
     case missingSenderOrMessageId(MessageRole)
-    /// A per-message key derives from the sender id in decimal digits; the
-    /// value is the sender id the event carries.
+    /// A per-message key derives from the sender id as a 64-bit integer,
+    /// and the event's sender id does not parse as one: it is not decimal
+    /// digits after an optional sign, or it is out of range. The value is
+    /// that sender id.
     case nonNumericSenderId(MessageRole, String)
   }
 
@@ -353,9 +360,10 @@ extension XChatError {
     /// The bytes end before the file's final frame, or inside its 24-byte
     /// header.
     case truncated
-    /// A frame authenticated but carries a tag the file format does not
-    /// define; the value is that tag. Only a sender holding the key can
-    /// write one.
+    /// A frame authenticated but carries a tag secretstream does not
+    /// define, 4 or above; the value is that tag. Only a sender holding
+    /// the key can write one. Frames tagged push (1) or rekey (2), which
+    /// secretstream defines, decrypt as the file's other frames.
     case unknownTag(UInt8)
   }
 }

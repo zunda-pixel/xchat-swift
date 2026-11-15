@@ -59,8 +59,8 @@ extension XChatCore {
     // The quoted message is opened first, with the reply's conversation key
     // when it is under the same version. Checked only when signing, a key
     // of the wrong length would fail as that message's contents not
-    // decrypting, and a malformed version or sender id as its key or
-    // conversation not matching.
+    // decrypting, a malformed version as no key being given for that
+    // message, and a malformed sender id as its conversation not matching.
     try requireSendParameters(
       conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
       senderId: senderId)

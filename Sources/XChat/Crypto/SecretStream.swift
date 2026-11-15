@@ -28,7 +28,7 @@ struct SecretStreamPush: Sendable {
   }
 
   /// Pushes a frame with any tag byte. libsodium authenticates whatever tag
-  /// a sender writes, so a reader must handle tags the format does not
+  /// a sender writes, so a reader must handle tags secretstream does not
   /// define; this writes them.
   mutating func push(
     _ plaintext: [UInt8], associatedData: [UInt8] = [], rawTag: UInt8
@@ -58,7 +58,7 @@ struct SecretStreamPull: Sendable {
   }
 
   /// Decrypts one frame, advancing the stream only when it authenticates
-  /// and carries a tag the format defines.
+  /// and carries a tag secretstream defines.
   mutating func pull(
     _ frame: [UInt8], associatedData: [UInt8] = []
   ) throws -> (plaintext: [UInt8], tag: SecretStreamTag) {

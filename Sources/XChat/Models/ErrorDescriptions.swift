@@ -278,8 +278,8 @@ extension XChatError.DecryptionFailure {
       "\(role.noun) uses per-message keys, which derive from its event's sender id and "
         + "message id, and the event lacks one of them"
     case .nonNumericSenderId(let role, let senderId):
-      "\(role.noun) uses a per-message key, which derives from its sender id in decimal "
-        + "digits, and its event's sender id is '\(senderId)'"
+      "\(role.noun) uses a per-message key, which derives from its sender id as a 64-bit "
+        + "integer, and its event's sender id '\(senderId)' is not one"
     }
   }
 
@@ -321,8 +321,8 @@ extension XChatError.DecryptionFailure {
     case .truncated:
       "the encrypted file is truncated: pass all of its bytes"
     case .unknownTag(let tag):
-      "a frame of the encrypted file authenticated but carries tag \(tag), which the file "
-        + "format does not define"
+      "a frame of the encrypted file authenticated but carries tag \(tag), which "
+        + "secretstream does not define"
     }
   }
 
@@ -343,7 +343,7 @@ extension XChatError.DecryptionFailure {
         + "bytes downloaded for that media hash key"
     case .unknownTag(let tag):
       "a frame of the encrypted file of media_hash_key '\(mediaHashKey)' authenticated but "
-        + "carries tag \(tag), which the file format does not define"
+        + "carries tag \(tag), which secretstream does not define"
     }
   }
 }

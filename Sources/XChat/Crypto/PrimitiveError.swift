@@ -8,8 +8,8 @@ enum PrimitiveError: Error, Hashable {
   case ciphertextTooShort
   /// Ciphertext did not authenticate: it is another key's, or corrupted.
   case authenticationFailed
-  /// A secretstream frame authenticated but carries a tag the stream format
-  /// does not define; the value is that tag.
+  /// A secretstream frame authenticated but carries a tag secretstream does
+  /// not define, 4 or above; the value is that tag.
   case unknownStreamTag(UInt8)
   /// A public key is not a P-256 point in compressed SEC1, uncompressed
   /// SEC1, or canonical SPKI DER.
