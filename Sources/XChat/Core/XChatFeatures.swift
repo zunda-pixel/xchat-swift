@@ -5,10 +5,11 @@ extension XChatCore {
   /// received.
   ///
   /// An accepted answer (200, body at most 64 KiB, JSON with a `features`
-  /// object whose members decode; see `parseFeatures`) replaces the switches
-  /// and picks the send format: v1 while `v1_send` is on, else v0. Anything
-  /// else changes nothing, so a failed read leaves the previous answer in
-  /// force. Returns whether the answer was accepted.
+  /// object) replaces the switches and picks the send format: v1 while
+  /// `v1_send` is on, else v0. A member whose value is not a JSON boolean
+  /// reads off; the answer is rejected only if a member fails to decode for
+  /// another reason. Anything else changes nothing, so a failed read leaves
+  /// the previous answer in force. Returns whether the answer was accepted.
   @discardableResult
   public func applyFeatures(statusCode: Int, body: [UInt8]) -> Bool {
     guard statusCode == 200, body.count <= FeatureFetch.maxBodyBytes,
@@ -44,8 +45,8 @@ extension XChatCore {
     /// throwing would reject the whole answer, so one member the server
     /// changes would keep every other switch from applying. Null is checked
     /// with `decodeNil()` first: `SingleValueDecodingContainer` documents
-    /// `valueNotFound` for it, and the new JSON decoder on swift-foundation's
-    /// main branch (swiftlang/swift-foundation#2263) throws that (Foundation
+    /// `valueNotFound` for it, and the JSON decoder added in
+    /// swiftlang/swift-foundation#2263 (not in 6.4.x) throws that (Foundation
     /// in Swift 6.4 and on macOS 27.2 reports `typeMismatch`). A failure
     /// other than a type mismatch still throws (although JSONDecoder reports
     /// none here): the protocol promises only those two for a value, so any
