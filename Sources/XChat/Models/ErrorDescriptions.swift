@@ -2,24 +2,42 @@ public import Foundation
 
 /// English descriptions for logs, built from each case and its values. The
 /// cases, not these strings, are what callers match on.
+///
+/// Only `XChatError` describes itself in English. Its nested enums print as
+/// Swift writes their cases, so a nested value in a log or the debugger
+/// shows the case to match.
 
-extension XChatError: LocalizedError, CustomStringConvertible {
+extension XChatError: LocalizedError, CustomStringConvertible, CustomDebugStringConvertible {
   public var errorDescription: String? { description }
 
   public var description: String {
     switch self {
-    case .invalidInput(let failure): failure.description
-    case .invalidState(let failure): failure.description
-    case .parse(let failure): failure.description
-    case .decryption(let failure): failure.description
-    case .verification(let failure): failure.description
-    case .internalError(let failure): failure.description
+    case .invalidInput(let failure): failure.explanation
+    case .invalidState(let failure): failure.explanation
+    case .parse(let failure): failure.explanation
+    case .decryption(let failure): failure.explanation
+    case .verification(let failure): failure.explanation
+    case .internalError(let failure): failure.explanation
+    }
+  }
+
+  /// The case and its values as Swift writes them, such as
+  /// `XChatError.invalidInput(.conversationKeyLength(31))`, so debugging
+  /// shows which case to match.
+  public var debugDescription: String {
+    switch self {
+    case .invalidInput(let failure): "XChatError.invalidInput(.\(failure))"
+    case .invalidState(let failure): "XChatError.invalidState(.\(failure))"
+    case .parse(let failure): "XChatError.parse(.\(failure))"
+    case .decryption(let failure): "XChatError.decryption(.\(failure))"
+    case .verification(let failure): "XChatError.verification(.\(failure))"
+    case .internalError(let failure): "XChatError.internalError(.\(failure))"
     }
   }
 }
 
-extension XChatError.InputFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.InputFailure {
+  var explanation: String {
     switch self {
     case .conversationKeyLength(let length):
       "Conversation key must be 32 bytes, got \(length)"
@@ -55,7 +73,7 @@ extension XChatError.InputFailure: CustomStringConvertible {
     case .entityRange(let start, let end):
       "Invalid entity: offsets \(start)..<\(end) are not a range of the text"
     case .attachment(let index, let failure):
-      "Invalid attachments[\(index)]: \(failure)"
+      "Invalid attachments[\(index)]: \(failure.explanation)"
     case .emptyTargetSequenceId:
       "Invalid target message sequence id: must not be empty"
     case .emptyReactionEmoji:
@@ -65,16 +83,16 @@ extension XChatError.InputFailure: CustomStringConvertible {
     case .notMessageEvent(.quotedMessage):
       "the quoted event is not a message: pass the event of a message"
     case .messageIsEdit(let role):
-      "\(role) is an edit: pass the event of the message that was edited"
+      "\(role.noun) is an edit, which carries neither the edited message's text nor its "
+        + "media"
     case .notTextMessage(let role):
-      "\(role) is a reaction, read marker, or other entry, not a text message"
+      "\(role.noun) is a reaction, read marker, or other entry, not a text message"
     case .notEncrypted(let role):
-      "\(role) is not encrypted, so neither is its media: use the downloaded bytes as "
-        + "they are"
+      "\(role.noun) is not encrypted, so neither is its media"
     case .noContents(let role):
-      "\(role) has no contents"
+      "\(role.noun) has no contents"
     case .noSequenceId(let role):
-      "\(role) carries no sequence_id"
+      "\(role.noun) carries no sequence_id"
     case .carriedMessageKeyLength(let length):
       "the key the reply carries for the quoted message is \(length) bytes, not 32: "
         + "pass the quoted message's own event"
@@ -86,12 +104,11 @@ extension XChatError.InputFailure: CustomStringConvertible {
     case .emptyMediaHashKey:
       "media_hash_key is empty: pass the media hash key of the attachment, as the "
         + "message lists it"
-    case .mediaHashKeyNotFound(_, let available) where available.isEmpty:
-      "the message has no media: pass the event of the message that carries the media"
+    case .mediaHashKeyNotFound(let mediaHashKey, let available) where available.isEmpty:
+      "media_hash_key '\(mediaHashKey)' is not in the message, which has no media"
     case .mediaHashKeyNotFound(let mediaHashKey, let available):
       "media_hash_key '\(mediaHashKey)' is not in the message, whose media hash keys are "
-        + "\(available.joined(separator: ", ")): pass one of those, or the event of the "
-        + "message that carries this media"
+        + available.joined(separator: ", ")
     case .quotedMediaHashKey(let mediaHashKey):
       "media_hash_key '\(mediaHashKey)' is media the reply quotes: its file belongs to "
         + "the quoted message and was uploaded with it, so there is nothing to encrypt"
@@ -103,8 +120,8 @@ extension XChatError.InputFailure: CustomStringConvertible {
   }
 }
 
-extension XChatError.AttachmentFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.AttachmentFailure {
+  var explanation: String {
     switch self {
     case .emptyMediaHashKey: "media_hash_key must not be empty"
     case .negativeDimensions: "width and height must not be negative"
@@ -124,8 +141,9 @@ extension XChatError.AttachmentFailure: CustomStringConvertible {
   }
 }
 
-extension XChatError.MessageRole: CustomStringConvertible {
-  public var description: String {
+extension XChatError.MessageRole {
+  /// The message as a sentence names it.
+  var noun: String {
     switch self {
     case .message: "the message"
     case .quotedMessage: "the quoted message"
@@ -133,8 +151,8 @@ extension XChatError.MessageRole: CustomStringConvertible {
   }
 }
 
-extension XChatError.StateFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.StateFailure {
+  var explanation: String {
     switch self {
     case .keysNotLoaded: "keys are not loaded: import keys first"
     case .signingKeyNotLoaded: "signing key is not loaded"
@@ -142,20 +160,20 @@ extension XChatError.StateFailure: CustomStringConvertible {
   }
 }
 
-extension XChatError.ParseFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.ParseFailure {
+  var explanation: String {
     switch self {
-    case .base64(let failure): failure.description
-    case .hex(let failure): failure.description
-    case .event(.base64(let failure)): "Invalid base64 event: \(failure)"
-    case .event(.thrift(let failure)): "Thrift parse error: \(failure)"
-    case .messageContents(let failure): "Content parse error: \(failure)"
+    case .base64(let failure): failure.explanation
+    case .hex(let failure): failure.explanation
+    case .event(.base64(let failure)): "Invalid base64 event: \(failure.explanation)"
+    case .event(.thrift(let failure)): "Thrift parse error: \(failure.explanation)"
+    case .messageContents(let failure): "Content parse error: \(failure.explanation)"
     }
   }
 }
 
-extension XChatError.Base64Failure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.Base64Failure {
+  var explanation: String {
     switch self {
     case .dataAfterPadding: "Invalid base64: '=' is followed by data"
     case .invalidCharacter(let byte): "Invalid base64 character: \(Unicode.Scalar(byte))"
@@ -164,8 +182,8 @@ extension XChatError.Base64Failure: CustomStringConvertible {
   }
 }
 
-extension XChatError.HexFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.HexFailure {
+  var explanation: String {
     switch self {
     case .oddLength(let length): "Invalid hex length: \(length)"
     case .invalidCharacter(let byte): "Invalid hex character: \(Unicode.Scalar(byte))"
@@ -173,8 +191,8 @@ extension XChatError.HexFailure: CustomStringConvertible {
   }
 }
 
-extension XChatError.ThriftFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.ThriftFailure {
+  var explanation: String {
     switch self {
     case .unexpectedEnd:
       "Thrift input ended unexpectedly"
@@ -204,8 +222,8 @@ extension XChatError.ThriftFailure: CustomStringConvertible {
   }
 }
 
-extension XChatError.DecryptionFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.DecryptionFailure {
+  var explanation: String {
     switch self {
     case .messageContents(let role, let failure, let key):
       Self.describe(failure, of: role, under: key)
@@ -214,17 +232,17 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
     case .file(let fault, nil):
       Self.describe(fault)
     case .missingConversationKey(let role, let version, let available) where available.isEmpty:
-      "\(role) is encrypted under conversation-key version '\(version)', and no "
+      "\(role.noun) is encrypted under conversation-key version '\(version)', and no "
         + "conversation keys were given"
     case .missingConversationKey(let role, let version, let available):
-      "\(role) is encrypted under conversation-key version '\(version)', and no key was "
-        + "given for it; keys were given for versions \(available.joined(separator: ", "))"
+      "\(role.noun) is encrypted under conversation-key version '\(version)', and no key "
+        + "was given for it; keys were given for versions \(available.joined(separator: ", "))"
     case .missingSenderOrMessageId(let role):
-      "\(role) uses per-message keys, which derive from its event's sender id and message "
-        + "id, and the event lacks one of them"
+      "\(role.noun) uses per-message keys, which derive from its event's sender id and "
+        + "message id, and the event lacks one of them"
     case .nonNumericSenderId(let role, let senderId):
-      "\(role) uses a per-message key, which derives from its sender id in decimal digits, "
-        + "and its event's sender id is '\(senderId)'"
+      "\(role.noun) uses a per-message key, which derives from its sender id in decimal "
+        + "digits, and its event's sender id is '\(senderId)'"
     }
   }
 
@@ -243,12 +261,13 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
       }
     return switch failure {
     case .authenticationFailed:
-      "the contents of \(role) do not decrypt under \(source): it is not the key they "
+      "the contents of \(role.noun) do not decrypt under \(source): it is not the key they "
         + "were encrypted under, or they are corrupted"
     case .ciphertextTooShort:
-      "the contents of \(role) are too short to be encrypted contents"
+      "the contents of \(role.noun) are too short to be encrypted contents"
     case .keyLength(let length):
-      "\(source) is \(length) bytes, not 32, so it cannot decrypt the contents of \(role)"
+      "\(source) is \(length) bytes, not 32, so it cannot decrypt the contents of "
+        + role.noun
     }
   }
 
@@ -292,26 +311,21 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
   }
 }
 
-extension XChatError.FileFailure: CustomStringConvertible {
-  public var description: String {
-    XChatError.DecryptionFailure.file(self, mediaHashKey: nil).description
-  }
-}
-
-extension XChatError.VerificationFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.VerificationFailure {
+  var explanation: String {
     switch self {
     case .unverifiable(let event):
-      "\(event) signature could not be verified: signature missing or no matching "
+      "\(event.name) signature could not be verified: signature missing or no matching "
         + "signing key"
-    case .rejected(let event, let rejection):
-      "\(event) signature verification failed: \(rejection)"
+    case .rejected(let event, let failure):
+      "\(event.name) signature verification failed: \(failure.explanation)"
     }
   }
 }
 
-extension XChatError.SignedEvent: CustomStringConvertible {
-  public var description: String {
+extension XChatError.SignedEvent {
+  /// The event type as the protocol names it.
+  var name: String {
     switch self {
     case .message: "Message"
     case .keyChange: "KeyChange"
@@ -319,8 +333,8 @@ extension XChatError.SignedEvent: CustomStringConvertible {
   }
 }
 
-extension XChatError.SignatureFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.SignatureFailure {
+  var explanation: String {
     switch self {
     case .missingSignatureVersion:
       "signature_version is missing or not an integer"
@@ -338,8 +352,8 @@ extension XChatError.SignatureFailure: CustomStringConvertible {
   }
 }
 
-extension XChatError.InternalFailure: CustomStringConvertible {
-  public var description: String {
+extension XChatError.InternalFailure {
+  var explanation: String {
     switch self {
     case .sodiumInitializationFailed:
       "libsodium initialization failed"

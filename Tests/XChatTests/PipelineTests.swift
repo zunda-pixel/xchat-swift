@@ -141,6 +141,86 @@ final class PipelineTests: XCTestCase {
     }
   }
 
+  // MARK: Errors converted on the way out
+
+  /// Malformed Thrift says what was being read: the event, or the
+  /// contents of a message that did decrypt.
+  func testMalformedThriftNamesWhatWasRead() throws {
+    XCTAssertThrowsError(
+      try XChatCore().decryptEvent(Base64.encodeStandard([0x0b, 0x00]))
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .parse(.event(.thrift(.unexpectedEnd))))
+    }
+
+    // Contents that decrypt to a truncated struct, in an unsigned event.
+    let key = TestVectors.bytes("conversation_key_b64")
+    let event = MessageEvent(
+      sequenceId: "1", messageId: "m", senderId: "1111", conversationId: "1111:2222",
+      detail: .messageCreate(
+        MessageCreateEvent(
+          contents: try encryptMessage(key: key, plaintext: [0x0c]),
+          conversationKeyVersion: "1001")))
+    XCTAssertThrowsError(
+      try XChatCore(rejectUnverified: false).decryptEvent(
+        encodeEvent(event), conversationKeys: ["1001": key])
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .parse(.messageContents(.unexpectedEnd)))
+    }
+  }
+
+  /// A signature that is checked and fails says why, for a message thrown
+  /// by decryptEvent and for a key change collected by decryptEvents.
+  func testRejectedSignaturesSayWhy() throws {
+    let senderId = TestVectors.string("event_sender_id")
+    let keyVersion = TestVectors.string("event_signing_key_version")
+    let otherKey = SigningKeyEntry(
+      userId: senderId, publicKeyVersion: keyVersion,
+      publicKey: Base64.encodeStandard(generateKeyPair().publicKey))
+    let notAKey = SigningKeyEntry(
+      userId: senderId, publicKeyVersion: keyVersion,
+      publicKey: Base64.encodeStandard([0x04] + [UInt8](repeating: 0, count: 64)))
+    let keys = ["1001": TestVectors.bytes("conversation_key_b64")]
+
+    let rejections: [(SigningKeyEntry, XChatError.SignatureFailure)] = [
+      (otherKey, .mismatch(keyVersion: keyVersion)),
+      (notAKey, .invalidSigningPublicKey),
+    ]
+    for (signingKey, failure) in rejections {
+      XCTAssertThrowsError(
+        try XChatCore().decryptEvent(
+          TestVectors.string("event_message_b64"), conversationKeys: keys,
+          signingKeys: [signingKey])
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .verification(.rejected(.message, failure)))
+      }
+    }
+
+    var shortSignature = try XChatCore().parseEvent(TestVectors.string("event_message_b64"))
+    shortSignature.messageEventSignature?.signature = Base64.encodeStandard([1, 2, 3])
+    XCTAssertThrowsError(
+      try XChatCore().decryptEvent(
+        encodeEvent(shortSignature), conversationKeys: keys,
+        signingKeys: [signingKey(userId: senderId)])
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .verification(.rejected(.message, .malformedSignature)))
+    }
+
+    let batch = try makeCore().decryptEvents(
+      [TestVectors.string("event_key_change_b64")], signingKeys: [notAKey])
+    XCTAssertEqual(
+      batch.errors, [0: .verification(.rejected(.keyChange, .invalidSigningPublicKey))])
+  }
+
+  /// A batch holds only XChatError values; an error of another type would
+  /// be kept as its description rather than dropped.
+  func testOtherErrorsBecomeUnexpectedWithTheirDescription() {
+    struct Other: Error {}
+    XCTAssertEqual(XChatError(Other()), .internalError(.unexpected("Other()")))
+    XCTAssertEqual(
+      XChatError(XChatError.invalidState(.keysNotLoaded)), .invalidState(.keysNotLoaded))
+  }
+
   // MARK: Batches and key changes
 
   func testBatchAdoptsKeyChangeAndDecrypts() throws {
