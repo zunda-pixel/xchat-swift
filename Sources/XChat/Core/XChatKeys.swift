@@ -44,9 +44,9 @@ extension XChatCore {
     }
     return PublicKeys(
       identity: Base64.encodeStandardPadded(
-        try derivePublicKey(privateKey: identityPrivateKey)),
+        try derivePublicKey(privateKey: identityPrivateKey, purpose: .identity)),
       signing: Base64.encodeStandardPadded(
-        try derivePublicKey(privateKey: signingPrivateKey)))
+        try derivePublicKey(privateKey: signingPrivateKey, purpose: .signing)))
   }
 
   /// The loaded identity key's fingerprint: URL-safe base64 SHA-256 of its
@@ -55,7 +55,7 @@ extension XChatCore {
     guard let identityPrivateKey else {
       throw XChatError.invalidState(.keysNotLoaded)
     }
-    let publicKey = try derivePublicKey(privateKey: identityPrivateKey)
+    let publicKey = try derivePublicKey(privateKey: identityPrivateKey, purpose: .identity)
     return fingerprint(spki: try spkiDER(publicKey: publicKey))
   }
 

@@ -71,8 +71,9 @@ extension XChatError {
     /// `FileEncryptor` or `FileDecryptor` directly, even when that key is
     /// a conversation key, such as the key of a group's avatar image.
     case fileKeyLength(Int)
-    /// A private key is not a 32-byte P-256 scalar in `[1, n-1]`.
-    case privateKey
+    /// A private key passed to `importKeys` is not a 32-byte P-256 scalar
+    /// in `[1, n-1]`; the value says which of the two keys it is.
+    case privateKey(KeyPurpose)
 
     // Ids and versions, with the value that was passed
 
@@ -196,6 +197,14 @@ extension XChatError {
   public enum MessageRole: Sendable, Hashable {
     case message
     case quotedMessage
+  }
+
+  /// Which of this device's private keys an error is about.
+  public enum KeyPurpose: Sendable, Hashable {
+    /// The identity key, which conversation keys are encrypted to.
+    case identity
+    /// The signing key, which signs the events this device sends.
+    case signing
   }
 }
 

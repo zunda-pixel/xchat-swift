@@ -53,9 +53,9 @@ public final class XChatCore {
     signingPrivateKey: [UInt8]? = nil,
     publicKeyVersion: String? = nil
   ) throws {
-    _ = try parsePrivateKey(identityPrivateKey)
+    _ = try parsePrivateKey(identityPrivateKey, purpose: .identity)
     if let signingPrivateKey {
-      _ = try parsePrivateKey(signingPrivateKey)
+      _ = try parsePrivateKey(signingPrivateKey, purpose: .signing)
     }
     if let publicKeyVersion {
       try validatePublicKeyVersion(publicKeyVersion)
@@ -79,13 +79,13 @@ public final class XChatCore {
     guard let identityPrivateKey else {
       throw XChatError.invalidState(.keysNotLoaded)
     }
-    return try derivePublicKey(privateKey: identityPrivateKey)
+    return try derivePublicKey(privateKey: identityPrivateKey, purpose: .identity)
   }
 
   /// The loaded signing key's SEC1 public key (65 bytes), when present.
   public func signingPublicKey() throws -> [UInt8]? {
     guard let signingPrivateKey else { return nil }
-    return try derivePublicKey(privateKey: signingPrivateKey)
+    return try derivePublicKey(privateKey: signingPrivateKey, purpose: .signing)
   }
 
   // MARK: Decryption

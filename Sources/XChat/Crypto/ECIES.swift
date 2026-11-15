@@ -46,18 +46,23 @@ func isValidPublicKey(_ bytes: [UInt8]) -> Bool {
   (try? parsePublicKey(bytes)) != nil
 }
 
-/// Parses a 32-byte P-256 private scalar in `[1, n-1]`.
-func parsePrivateKey(_ bytes: [UInt8]) throws -> P256.KeyAgreement.PrivateKey {
+/// Parses a 32-byte P-256 private scalar in `[1, n-1]`. `purpose` says
+/// which of this device's keys the bytes are, which the error names.
+func parsePrivateKey(
+  _ bytes: [UInt8], purpose: XChatError.KeyPurpose
+) throws -> P256.KeyAgreement.PrivateKey {
   do {
     return try P256.KeyAgreement.PrivateKey(rawRepresentation: bytes)
   } catch {
-    throw XChatError.invalidInput(.privateKey)
+    throw XChatError.invalidInput(.privateKey(purpose))
   }
 }
 
 /// Derives a private key's SEC1 uncompressed public key (65 bytes).
-func derivePublicKey(privateKey: [UInt8]) throws -> [UInt8] {
-  let key = try parsePrivateKey(privateKey)
+func derivePublicKey(
+  privateKey: [UInt8], purpose: XChatError.KeyPurpose
+) throws -> [UInt8] {
+  let key = try parsePrivateKey(privateKey, purpose: purpose)
   return Array(key.publicKey.x963Representation)
 }
 
@@ -105,7 +110,8 @@ func decryptWithPrivateKey(privateKey: [UInt8], data: [UInt8]) throws -> [UInt8]
     // ciphertext that does not open.
     throw PrimitiveError.authenticationFailed
   }
-  let secret = try parsePrivateKey(privateKey)
+  // Conversation keys are encrypted to the identity key.
+  let secret = try parsePrivateKey(privateKey, purpose: .identity)
   let shared: SharedSecret
   do {
     shared = try secret.sharedSecretFromKeyAgreement(with: ephemeral)

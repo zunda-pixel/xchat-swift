@@ -252,7 +252,7 @@ func signEventSignature(
   }
 
   let signature = try sign(privateKey: signingPrivateKey, payload: Array(payload.utf8))
-  let publicKey = try derivePublicKey(privateKey: signingPrivateKey)
+  let publicKey = try derivePublicKey(privateKey: signingPrivateKey, purpose: .signing)
   let signatureStruct = MessageEventSignature(
     signature: Base64.encodeStandard(signature),
     publicKeyVersion: publicKeyVersion,

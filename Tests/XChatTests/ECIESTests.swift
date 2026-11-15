@@ -12,17 +12,20 @@ final class ECIESTests: XCTestCase {
     XCTAssertEqual(pair.publicKey[0], 0x04)
     XCTAssertEqual(pair.privateKey.count, 32)
     XCTAssertTrue(isValidPublicKey(pair.publicKey))
-    XCTAssertEqual(try derivePublicKey(privateKey: pair.privateKey), pair.publicKey)
+    XCTAssertEqual(
+      try derivePublicKey(privateKey: pair.privateKey, purpose: .identity), pair.publicKey)
   }
 
   /// Deriving public keys from the vectors' private keys reproduces the
   /// vectors' SEC1 public keys, so the encoding matches the reference.
   func testVectorPrivateKeysDeriveTheirPublicKeys() throws {
     XCTAssertEqual(
-      try derivePublicKey(privateKey: TestVectors.bytes("identity_private_b64")),
+      try derivePublicKey(
+        privateKey: TestVectors.bytes("identity_private_b64"), purpose: .identity),
       TestVectors.bytes("identity_public_b64"))
     XCTAssertEqual(
-      try derivePublicKey(privateKey: TestVectors.bytes("signing_private_b64")),
+      try derivePublicKey(
+        privateKey: TestVectors.bytes("signing_private_b64"), purpose: .signing),
       TestVectors.bytes("signing_public_b64"))
   }
 
@@ -121,12 +124,13 @@ final class ECIESTests: XCTestCase {
       XCTAssertThrowsError(
         try decryptWithPrivateKey(privateKey: key, data: ciphertext)
       ) { error in
-        XCTAssertEqual(error as? XChatError, .invalidInput(.privateKey))
+        XCTAssertEqual(error as? XChatError, .invalidInput(.privateKey(.identity)))
       }
     }
-    XCTAssertThrowsError(try derivePublicKey(privateKey: [UInt8](repeating: 0, count: 32))) {
-      error in
-      XCTAssertEqual(error as? XChatError, .invalidInput(.privateKey))
+    XCTAssertThrowsError(
+      try derivePublicKey(privateKey: [UInt8](repeating: 0, count: 32), purpose: .signing)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.privateKey(.signing)))
     }
   }
 

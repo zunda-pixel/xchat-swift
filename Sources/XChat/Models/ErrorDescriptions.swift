@@ -78,8 +78,8 @@ extension XChatError.InputFailure {
       "Conversation key must be 32 bytes, got \(length)"
     case .fileKeyLength(let length):
       "File key must be 32 bytes, got \(length)"
-    case .privateKey:
-      "Invalid private key: not a P-256 scalar"
+    case .privateKey(let purpose):
+      "Invalid \(purpose.name) private key: not a P-256 scalar"
     case .publicKeyVersion(let version):
       "Invalid public key version '\(version)': pass the key version as the X API "
         + "returns it, an integer in digits"
@@ -180,6 +180,16 @@ extension XChatError.MessageRole {
     switch self {
     case .message: "the message"
     case .quotedMessage: "the quoted message"
+    }
+  }
+}
+
+extension XChatError.KeyPurpose {
+  /// The key as a sentence names it, before "private key".
+  var name: String {
+    switch self {
+    case .identity: "identity"
+    case .signing: "signing"
     }
   }
 }

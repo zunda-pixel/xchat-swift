@@ -67,6 +67,27 @@ import XChat
   #expect(content.replyingToPreview?.messageText == TestVectors.string("event_message_key_text"))
 }
 
+/// A private key that is not a P-256 scalar is reported as the key it was
+/// passed as, and the keys loaded before stay loaded.
+@Test func importingAnInvalidPrivateKeyNamesWhichKey() throws {
+  let core = XChatCore()
+  let identity = TestVectors.bytes("identity_private_b64")
+  let signing = TestVectors.bytes("signing_private_b64")
+  try core.importKeys(
+    identityPrivateKey: identity, signingPrivateKey: signing, publicKeyVersion: "1")
+
+  let zero = [UInt8](repeating: 0, count: 32)
+  #expect(throws: XChatError.invalidInput(.privateKey(.identity))) {
+    try core.importKeys(identityPrivateKey: zero, signingPrivateKey: signing)
+  }
+  #expect(throws: XChatError.invalidInput(.privateKey(.signing))) {
+    try core.importKeys(identityPrivateKey: identity, signingPrivateKey: Array(zero.prefix(31)))
+  }
+  let keys = try core.exportKeys()
+  #expect(keys.identity == identity)
+  #expect(keys.signing == signing)
+}
+
 @Test(arguments: ["abc", "01", "-1", "9223372036854775808"])
 func importingAnInvalidKeyVersionPreservesLoadedKeys(version: String) throws {
   let core = XChatCore()
