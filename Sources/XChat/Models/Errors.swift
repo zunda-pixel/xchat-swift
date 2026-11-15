@@ -270,19 +270,22 @@ extension XChatError {
     case invalidCharacter(UInt8)
   }
 
-  /// Why a Thrift binary-protocol encoding is malformed.
+  /// Why a Thrift binary-protocol encoding is malformed. Sizes, counts and
+  /// limits are `Int`s, whatever width the wire declares them in.
   public enum ThriftFailure: Sendable, Hashable {
     /// The input ends inside a value.
     case unexpectedEnd
     /// A type byte names no Thrift type; the value is that byte.
     case unknownType(UInt8)
-    /// A binary value or container declares a negative size.
-    case negativeSize(ThriftType, Int32)
-    /// A binary value or container declares a size over the limit.
-    case sizeExceedsMaximum(ThriftType, Int32, maximum: Int)
+    /// A binary value or container declares a negative size; the value is
+    /// that size.
+    case negativeSize(ThriftType, Int)
+    /// A binary value or container declares a size over the limit; the
+    /// value is that size.
+    case sizeExceedsMaximum(ThriftType, Int, maximum: Int)
     /// The containers read so far hold more elements in total than the
-    /// limit.
-    case totalElementsExceedMaximum(UInt64, maximum: UInt64)
+    /// limit; the value is that total.
+    case totalElementsExceedMaximum(Int, maximum: Int)
     /// Skipped values nest deeper than the limit.
     case nestingTooDeep(maximum: Int)
     /// A string is not UTF-8.

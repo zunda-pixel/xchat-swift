@@ -75,7 +75,7 @@ private let maximumContainerElements = 10_000
 
 /// Maximum cumulative container elements across one document, so nested
 /// containers cannot multiply the per-container cap.
-private let maximumTotalElements: UInt64 = 100_000
+private let maximumTotalElements = 100_000
 
 /// Maximum string or binary length, matching the reference's default.
 private let maximumBinarySize = 100 * 1024 * 1024
@@ -92,7 +92,7 @@ struct ThriftReader {
   private let bytes: [UInt8]
   private var offset = 0
   /// Running total of declared container elements in this document.
-  private var totalElements: UInt64 = 0
+  private var totalElements = 0
 
   init(_ bytes: [UInt8]) {
     self.bytes = bytes
@@ -138,10 +138,10 @@ struct ThriftReader {
   mutating func readBinary() throws -> [UInt8] {
     let length = try readI32()
     guard length >= 0 else {
-      throw ThriftError(.negativeSize(.binary, length))
+      throw ThriftError(.negativeSize(.binary, Int(length)))
     }
     guard Int(length) <= maximumBinarySize else {
-      throw ThriftError(.sizeExceedsMaximum(.binary, length, maximum: maximumBinarySize))
+      throw ThriftError(.sizeExceedsMaximum(.binary, Int(length), maximum: maximumBinarySize))
     }
     return Array(try readBytes(Int(length)))
   }
@@ -234,7 +234,7 @@ struct ThriftReader {
   // MARK: Internals
 
   private mutating func readContainerCount(_ container: ThriftType) throws -> Int {
-    let count = try readI32()
+    let count = Int(try readI32())
     guard count >= 0 else {
       throw ThriftError(.negativeSize(container, count))
     }
@@ -242,12 +242,14 @@ struct ThriftReader {
       throw ThriftError(
         .sizeExceedsMaximum(container, count, maximum: maximumContainerElements))
     }
-    totalElements = totalElements &+ UInt64(count)
+    // Each count is at most the per-container cap and the total is checked
+    // after every addition, so it stays far below Int's range.
+    totalElements += count
     guard totalElements <= maximumTotalElements else {
       throw ThriftError(
         .totalElementsExceedMaximum(totalElements, maximum: maximumTotalElements))
     }
-    return Int(count)
+    return count
   }
 
   private mutating func readUInt8() throws -> UInt8 {
