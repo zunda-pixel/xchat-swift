@@ -1,4 +1,4 @@
-import _Clibsodium
+import Clibsodium
 
 /// NaCl secretbox with detached ciphertext and authentication tag.
 struct XSalsa20Poly1305: Sendable {

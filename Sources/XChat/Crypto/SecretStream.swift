@@ -1,4 +1,4 @@
-import _Clibsodium
+import Clibsodium
 
 enum SecretStreamTag: UInt8, Sendable {
   case message = 0
