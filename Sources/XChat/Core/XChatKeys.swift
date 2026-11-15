@@ -11,8 +11,8 @@ extension XChatCore {
     let identity = generateKeyPair()
     let signing = generateKeyPair()
 
-    let identitySPKI = try spkiDER(publicKey: identity.publicKey)
-    let signingSPKI = try spkiDER(publicKey: signing.publicKey)
+    let identitySPKI = identity.publicKeySPKI
+    let signingSPKI = signing.publicKeySPKI
     // The signing key endorses the identity key, and the identity key
     // endorses the signing key: the two-way binding registration stores.
     let identitySignature = try sign(
@@ -55,8 +55,8 @@ extension XChatCore {
     guard let identityPrivateKey else {
       throw XChatError.invalidState(.keysNotLoaded)
     }
-    let publicKey = try derivePublicKey(privateKey: identityPrivateKey, purpose: .identity)
-    return fingerprint(spki: try spkiDER(publicKey: publicKey))
+    return fingerprint(
+      spki: try derivePublicKeySPKI(privateKey: identityPrivateKey, purpose: .identity))
   }
 
   /// Sets the version the loaded keys were registered under, which signs

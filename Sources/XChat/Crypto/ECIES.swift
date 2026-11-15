@@ -9,11 +9,17 @@ func spkiDER(publicKey: [UInt8]) throws -> [UInt8] {
 }
 
 /// Generates a P-256 keypair: a 65-byte uncompressed public key
-/// (`0x04 || x || y`) and a 32-byte private scalar. Identity and signing
-/// keys are the same kind of key; the purpose is metadata the SDK records.
-func generateKeyPair() -> (publicKey: [UInt8], privateKey: [UInt8]) {
+/// (`0x04 || x || y`), a 32-byte private scalar, and the public key in SPKI
+/// DER. The SPKI comes from the generated key, not from parsing its bytes
+/// again as `spkiDER` does, so generating a keypair cannot fail. Identity
+/// and signing keys are the same kind of key; the purpose is metadata the
+/// SDK records.
+func generateKeyPair() -> (publicKey: [UInt8], privateKey: [UInt8], publicKeySPKI: [UInt8]) {
   let key = P256.KeyAgreement.PrivateKey()
-  return (Array(key.publicKey.x963Representation), Array(key.rawRepresentation))
+  return (
+    Array(key.publicKey.x963Representation), Array(key.rawRepresentation),
+    Array(key.publicKey.derRepresentation)
+  )
 }
 
 /// Parses a P-256 public key in compressed SEC1, uncompressed SEC1, or SPKI
@@ -64,6 +70,16 @@ func derivePublicKey(
 ) throws -> [UInt8] {
   let key = try parsePrivateKey(privateKey, purpose: purpose)
   return Array(key.publicKey.x963Representation)
+}
+
+/// Derives a private key's public key in SPKI DER. Unlike `spkiDER`, it
+/// parses no public key bytes, so only the private key can be rejected, as
+/// `XChatError.invalidInput(.privateKey(purpose))`.
+func derivePublicKeySPKI(
+  privateKey: [UInt8], purpose: XChatError.KeyPurpose
+) throws -> [UInt8] {
+  let key = try parsePrivateKey(privateKey, purpose: purpose)
+  return Array(key.publicKey.derRepresentation)
 }
 
 /// Encrypts `data` to a P-256 public key using ECIES: an ephemeral ECDH
