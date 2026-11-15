@@ -11,10 +11,14 @@ struct AES128GCM {
   func seal(
     nonce: [UInt8], plaintext: [UInt8], authenticatedData: [UInt8] = []
   ) throws -> [UInt8] {
-    let box = try AES.GCM.seal(
-      plaintext, using: key, nonce: AES.GCM.Nonce(data: nonce),
-      authenticating: authenticatedData)
-    return Array(box.ciphertext) + Array(box.tag)
+    do {
+      let box = try AES.GCM.seal(
+        plaintext, using: key, nonce: AES.GCM.Nonce(data: nonce),
+        authenticating: authenticatedData)
+      return Array(box.ciphertext) + Array(box.tag)
+    } catch {
+      throw XChatError.internalError(.gcmEncryptionFailed)
+    }
   }
 
   func open(
@@ -22,11 +26,15 @@ struct AES128GCM {
   ) throws -> [UInt8] {
     let tagSize = 16
     guard ciphertextAndTag.count >= tagSize else {
-      throw XChatError.decryption(.ciphertextTooShort)
+      throw PrimitiveError.ciphertextTooShort
     }
-    let box = try AES.GCM.SealedBox(
-      nonce: AES.GCM.Nonce(data: nonce), ciphertext: ciphertextAndTag.dropLast(tagSize),
-      tag: ciphertextAndTag.suffix(tagSize))
-    return try Array(AES.GCM.open(box, using: key, authenticating: authenticatedData))
+    do {
+      let box = try AES.GCM.SealedBox(
+        nonce: AES.GCM.Nonce(data: nonce), ciphertext: ciphertextAndTag.dropLast(tagSize),
+        tag: ciphertextAndTag.suffix(tagSize))
+      return try Array(AES.GCM.open(box, using: key, authenticating: authenticatedData))
+    } catch {
+      throw PrimitiveError.authenticationFailed
+    }
   }
 }

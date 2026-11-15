@@ -40,7 +40,7 @@ final class HashTests: XCTestCase {
   /// info, 42 bytes of output.
   func testHKDFRFC5869Case3() throws {
     let ikm = [UInt8](repeating: 0x0b, count: 22)
-    let okm = try hkdf(secret: ikm, salt: "", length: 42)
+    let okm = hkdf(secret: ikm, salt: "", length: 42)
     XCTAssertEqual(
       Hex.encode(okm),
       "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d"
@@ -49,21 +49,18 @@ final class HashTests: XCTestCase {
 
   func testHKDFInfoAndSaltDomainSeparate() throws {
     let secret = Array("secret key material".utf8)
-    let base = try hkdf(secret: secret, salt: "salt", length: 32)
-    let withInfo = try hkdfWithInfo(secret: secret, salt: "salt", info: [1], length: 32)
-    let otherSalt = try hkdf(secret: secret, salt: "other", length: 32)
+    let base = hkdf(secret: secret, salt: "salt", length: 32)
+    let withInfo = hkdfWithInfo(secret: secret, salt: "salt", info: [1], length: 32)
+    let otherSalt = hkdf(secret: secret, salt: "other", length: 32)
     XCTAssertEqual(base.count, 32)
     XCTAssertNotEqual(base, withInfo)
     XCTAssertNotEqual(base, otherSalt)
-    XCTAssertEqual(base, try hkdf(secret: secret, salt: "salt", length: 32))
+    XCTAssertEqual(base, hkdf(secret: secret, salt: "salt", length: 32))
   }
 
-  func testHKDFLengthLimit() {
-    XCTAssertThrowsError(try hkdf(secret: [1], salt: "s", length: 8161)) { error in
-      XCTAssertEqual(
-        error as? XChatError, .internalError(.hkdfLengthExceedsMaximum(8161, maximum: 8160)))
-    }
-    XCTAssertNoThrow(try hkdf(secret: [1], salt: "s", length: 8160))
+  /// HKDF-SHA256 derives up to the spec's 255 blocks of 32 bytes.
+  func testHKDFDerivesUpToTheSpecMaximum() {
+    XCTAssertEqual(hkdf(secret: [1], salt: "s", length: 8160).count, 8160)
   }
 
   func testRandomBytes() {

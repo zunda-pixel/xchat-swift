@@ -63,20 +63,8 @@ extension XChatError {
     /// A key passed to `encryptFileWithKey` or `decryptFileWithKey` is not
     /// 32 bytes; the value is its length.
     case fileKeyLength(Int)
-    /// A public key is not a P-256 point in compressed SEC1, uncompressed
-    /// SEC1, or SPKI DER.
-    case publicKey
-    /// A public key decodes but is not the canonical P-256
-    /// SubjectPublicKeyInfo, such as one whose algorithm names another
-    /// curve.
-    case subjectPublicKeyInfo
     /// A private key is not a 32-byte P-256 scalar in `[1, n-1]`.
     case privateKey
-    /// The ephemeral public key an ECIES ciphertext starts with is not a
-    /// P-256 point.
-    case ephemeralPublicKey
-    /// A secretstream header is not 24 bytes; the value is its length.
-    case streamHeaderLength(Int)
     /// The loaded keys have no public key version to sign under: import
     /// them with their version, or set it.
     case signingKeyVersionNotSet
@@ -97,6 +85,10 @@ extension XChatError {
     /// A participant's public key version is not a non-negative integer in
     /// canonical decimal form.
     case participantKeyVersion(String)
+    /// The identity public key of the participant `userId` is not the
+    /// base64 of a P-256 public key in compressed SEC1, uncompressed SEC1,
+    /// or canonical SPKI DER.
+    case participantIdentityKey(userId: String)
 
     // Building events
 
@@ -294,18 +286,6 @@ extension XChatError {
 extension XChatError {
   /// Why ciphertext did not decrypt.
   public enum DecryptionFailure: Sendable, Hashable {
-    /// The ciphertext did not authenticate: it was encrypted under another
-    /// key, or it is corrupted. Authenticated encryption cannot tell the
-    /// two apart, so one case covers both.
-    case authenticationFailed
-    /// The ciphertext is shorter than its format's fixed overhead (nonce,
-    /// tag, or ephemeral key), so it is no ciphertext of that format.
-    case ciphertextTooShort
-    /// libsodium refused a secretstream header.
-    case invalidStreamHeader
-    /// A secretstream frame authenticated but carries a tag the format does
-    /// not define; the value is that tag.
-    case unknownStreamTag(UInt8)
     /// A message's contents did not decrypt under `key`, the key the SDK
     /// resolved for that message from the arguments.
     case messageContents(MessageRole, ContentsFailure, key: ContentsKey)
@@ -356,7 +336,7 @@ extension XChatError {
   public enum FileFailure: Sendable, Hashable {
     /// A frame with more of the file after it did not authenticate: the
     /// bytes are corrupted, or they are another file's (encrypted under
-    /// another key). As with `DecryptionFailure.authenticationFailed`, the
+    /// another key). As with `ContentsFailure.authenticationFailed`, the
     /// two cannot be told apart.
     case authenticationFailed
     /// The last frame did not authenticate. Bytes cut short inside that
@@ -368,6 +348,10 @@ extension XChatError {
     /// The bytes end before the file's final frame, or inside its 24-byte
     /// header.
     case truncated
+    /// A frame authenticated but carries a tag the file format does not
+    /// define; the value is that tag. Only a sender holding the key can
+    /// write one.
+    case unknownTag(UInt8)
   }
 }
 
@@ -376,8 +360,6 @@ extension XChatError {
 extension XChatError {
   /// Why a signature did not verify.
   public enum VerificationFailure: Sendable, Hashable {
-    /// A signature is not a raw 64-byte `r || s` ECDSA P-256 signature.
-    case malformedSignature
     /// An event's signature could not be checked: the event carries none,
     /// or no signing key was given at its key version. Thrown while
     /// unverified events are rejected.
@@ -416,8 +398,6 @@ extension XChatError {
 extension XChatError {
   /// What failed inside the SDK.
   public enum InternalFailure: Sendable, Hashable {
-    /// HKDF was asked for more output than it can derive.
-    case hkdfLengthExceedsMaximum(Int, maximum: Int)
     /// libsodium did not initialize.
     case sodiumInitializationFailed
     /// libsodium did not start a secretstream.
@@ -426,8 +406,12 @@ extension XChatError {
     case streamEncryptionFailed
     /// libsodium did not encrypt a secretbox.
     case secretboxEncryptionFailed
-    /// The loaded signing key is not a P-256 private key.
-    case invalidSigningPrivateKey
+    /// Swift Crypto did not agree a P-256 shared secret for ECIES.
+    case keyAgreementFailed
+    /// Swift Crypto did not encrypt with AES-GCM for ECIES.
+    case gcmEncryptionFailed
+    /// Swift Crypto did not sign with the loaded signing key.
+    case signingFailed
     /// An error that is not an `XChatError` reached a result that holds
     /// only `XChatError`s; the value is that error's description. Nothing
     /// in the SDK is known to raise one.

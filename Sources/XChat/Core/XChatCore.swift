@@ -421,7 +421,7 @@ public final class XChatCore {
       throw XChatError.decryption(.missingSenderOrMessageId(role))
     }
     guard
-      let key = try deriveMessageKey(
+      let key = deriveMessageKey(
         conversationKey: conversationKey, senderId: senderId, messageId: messageId)
     else {
       throw XChatError.decryption(.nonNumericSenderId(role, senderId))
@@ -786,10 +786,10 @@ private func openQuotedEvent(
   } else if let version = create.conversationKeyVersion, let conversationKey = keys[version] {
     key =
       usesMessageKey
-      ? (try? deriveMessageKey(
+      ? deriveMessageKey(
         conversationKey: conversationKey,
         senderId: raw.senderId ?? "",
-        messageId: raw.messageId ?? ""))
+        messageId: raw.messageId ?? "")
       : conversationKey
   } else {
     key = nil

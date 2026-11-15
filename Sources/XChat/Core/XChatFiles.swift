@@ -107,7 +107,7 @@ extension XChatCore {
     let message = try openMessage(
       event, create, conversationKeys: conversationKeys, carriedMessageKey: nil,
       role: .message)
-    if let key = try attachmentKey(message, mediaHashKey: mediaHashKey) {
+    if let key = attachmentKey(message, mediaHashKey: mediaHashKey) {
       return key
     }
 
@@ -117,7 +117,7 @@ extension XChatCore {
       do {
         let quoted = try openQuoted(
           event, preview: preview, conversationKeys: conversationKeys)
-        if let key = try attachmentKey(quoted, mediaHashKey: mediaHashKey) {
+        if let key = attachmentKey(quoted, mediaHashKey: mediaHashKey) {
           return key
         }
         known += mediaHashKeys(quoted.contents.attachments)
@@ -152,7 +152,7 @@ extension XChatCore {
       event, create,
       conversationKeys: [conversationKeyVersion: conversationKey],
       carriedMessageKey: nil, role: .message)
-    if let key = try attachmentKey(message, mediaHashKey: mediaHashKey) {
+    if let key = attachmentKey(message, mediaHashKey: mediaHashKey) {
       return key
     }
 
@@ -250,7 +250,7 @@ extension XChatCore {
   /// has one.
   private func attachmentKey(
     _ message: OpenedMessage, mediaHashKey: String
-  ) throws -> [UInt8]? {
+  ) -> [UInt8]? {
     guard
       let found = findAttachment(
         message.contents.attachments, mediaHashKey: mediaHashKey)
@@ -259,7 +259,7 @@ extension XChatCore {
     case .conversation(let key):
       return key
     case .message(let messageKey, let messageId):
-      return try deriveAttachmentKey(
+      return deriveAttachmentKey(
         messageKey: messageKey,
         attachmentId: resolveAttachmentId(
           storedId: found.ownId, messageId: messageId, index: found.position))

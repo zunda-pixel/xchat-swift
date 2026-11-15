@@ -237,6 +237,24 @@ final class FileCryptoTests: XCTestCase {
     }
   }
 
+  /// A frame that authenticates under the key but carries a tag the file
+  /// format does not define, which only a sender holding the key can
+  /// write, is reported as that tag, whether more of the file follows it
+  /// or it is the last frame.
+  func testUndefinedFrameTagRejected() throws {
+    let (header, pusher) = try SecretStreamPush.start(key: Self.key)
+    var push = pusher
+    let middle = try push.push([UInt8](repeating: 1, count: 1024), rawTag: 0x10)
+    let last = try push.push([2], tag: .final)
+
+    assertThrows(.unknownTag(0x10)) {
+      try XChatCore().decryptFileWithKey(header + middle + last, key: Self.key)
+    }
+    assertThrows(.unknownTag(0x10)) {
+      try XChatCore().decryptFileWithKey(header + middle, key: Self.key)
+    }
+  }
+
   // MARK: Media faults carry the media hash key
 
   private static let mediaHashKey = TestVectors.string("media_conversation_key_hash_key")

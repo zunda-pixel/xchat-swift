@@ -22,7 +22,7 @@ import XChat
   (XChatError.invalidInput(.noParticipants), "invalid_input"),
   (.invalidState(.signingKeyNotLoaded), "invalid_state"),
   (.parse(.base64(.dataAfterPadding)), "parse"),
-  (.decryption(.authenticationFailed), "decryption"),
+  (.decryption(.file(.truncated, mediaHashKey: nil)), "decryption"),
   (.verification(.unverifiable(.message)), "verification"),
   (.internalError(.sodiumInitializationFailed), "internal"),
 ])

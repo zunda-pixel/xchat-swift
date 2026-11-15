@@ -347,7 +347,7 @@ final class PipelineTests: XCTestCase {
       let attachmentId = resolveAttachmentId(
         storedId: attachment.attachmentId, messageId: message.meta.messageId ?? "",
         index: index)
-      let attachmentKey = try deriveAttachmentKey(
+      let attachmentKey = deriveAttachmentKey(
         messageKey: messageKey, attachmentId: attachmentId)
       XCTAssertEqual(
         try decryptFile(

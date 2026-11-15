@@ -28,17 +28,17 @@ func deriveMessageKey(
   conversationKey: [UInt8],
   senderId: String,
   messageId: String
-) throws -> [UInt8]? {
+) -> [UInt8]? {
   guard let sender = Int64(senderId) else { return nil }
   let info = "\(sender):\(messageId)"
-  return try hkdfWithInfo(
+  return hkdfWithInfo(
     secret: conversationKey, salt: messageKeySalt, info: Array(info.utf8), length: 32)
 }
 
 /// Derives an attachment's 32-byte key from its message key and attachment
 /// id.
-func deriveAttachmentKey(messageKey: [UInt8], attachmentId: String) throws -> [UInt8] {
-  try hkdfWithInfo(
+func deriveAttachmentKey(messageKey: [UInt8], attachmentId: String) -> [UInt8] {
+  hkdfWithInfo(
     secret: messageKey, salt: attachmentKeySalt, info: Array(attachmentId.utf8), length: 32)
 }
 
@@ -64,7 +64,7 @@ func deriveMediaMessageId(
   senderId: String,
   conversationId: String,
   mediaHashKeys: [String]
-) throws -> String {
+) -> String {
   // Length-prefixed fields: no two distinct inputs share an encoding.
   var info: [UInt8] = []
   let fields = [conversationKeyVersion, senderId, conversationId] + mediaHashKeys
@@ -82,7 +82,7 @@ func deriveMediaMessageId(
     ]
     info += Array(field.utf8)
   }
-  var bytes = try hkdfWithInfo(
+  var bytes = hkdfWithInfo(
     secret: conversationKey, salt: mediaMessageIdSalt, info: info, length: 16)
 
   // Version 4, RFC 4122 variant.

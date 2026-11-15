@@ -25,16 +25,8 @@ extension XChatError.InputFailure: CustomStringConvertible {
       "Conversation key must be 32 bytes, got \(length)"
     case .fileKeyLength(let length):
       "Invalid key (expected 32 bytes, got \(length))"
-    case .streamHeaderLength(let length):
-      "secretstream headers are 24 bytes, got \(length)"
-    case .publicKey:
-      "Invalid public key: not a P-256 point in SEC1 or SPKI DER"
-    case .subjectPublicKeyInfo:
-      "Invalid P-256 SubjectPublicKeyInfo"
     case .privateKey:
       "Invalid private key: not a P-256 scalar"
-    case .ephemeralPublicKey:
-      "Invalid ephemeral public key: not a P-256 point"
     case .signingKeyVersionNotSet:
       "signing key version is not set: import keys with its public key version"
     case .publicKeyVersion(let version):
@@ -50,6 +42,9 @@ extension XChatError.InputFailure: CustomStringConvertible {
     case .participantKeyVersion(let value):
       "Invalid public_keys public_key_version '\(value)': pass the key version as the X "
         + "API returns it, an integer in digits"
+    case .participantIdentityKey(let userId):
+      "the identity public key of participant \(userId) is not the base64 of a P-256 public "
+        + "key in SEC1 or SPKI DER"
     case .noParticipants:
       "public_keys must not be empty"
     case .conversationIdNotDerivable(let distinctUsers):
@@ -212,14 +207,6 @@ extension XChatError.ThriftFailure: CustomStringConvertible {
 extension XChatError.DecryptionFailure: CustomStringConvertible {
   public var description: String {
     switch self {
-    case .authenticationFailed:
-      "Decryption failed - invalid key or corrupted data"
-    case .ciphertextTooShort:
-      "Ciphertext too short"
-    case .invalidStreamHeader:
-      "Secretstream initialization failed"
-    case .unknownStreamTag(let tag):
-      "secretstream frame has an unknown tag: \(tag)"
     case .messageContents(let role, let failure, let key):
       Self.describe(failure, of: role, under: key)
     case .file(let fault, let mediaHashKey?):
@@ -277,6 +264,9 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
       "the bytes continue past the end of the encrypted file: pass only its bytes"
     case .truncated:
       "the encrypted file is truncated: pass all of its bytes"
+    case .unknownTag(let tag):
+      "a frame of the encrypted file authenticated but carries tag \(tag), which the file "
+        + "format does not define"
     }
   }
 
@@ -295,6 +285,9 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
     case .truncated:
       "the bytes of media_hash_key '\(mediaHashKey)' are truncated: pass the complete "
         + "bytes downloaded for that media hash key"
+    case .unknownTag(let tag):
+      "a frame of the encrypted file of media_hash_key '\(mediaHashKey)' authenticated but "
+        + "carries tag \(tag), which the file format does not define"
     }
   }
 }
@@ -308,8 +301,6 @@ extension XChatError.FileFailure: CustomStringConvertible {
 extension XChatError.VerificationFailure: CustomStringConvertible {
   public var description: String {
     switch self {
-    case .malformedSignature:
-      "Invalid signature: not a 64-byte ECDSA P-256 signature"
     case .unverifiable(let event):
       "\(event) signature could not be verified: signature missing or no matching "
         + "signing key"
@@ -350,8 +341,6 @@ extension XChatError.SignatureFailure: CustomStringConvertible {
 extension XChatError.InternalFailure: CustomStringConvertible {
   public var description: String {
     switch self {
-    case .hkdfLengthExceedsMaximum(let length, let maximum):
-      "Requested length \(length) exceeds maximum \(maximum)"
     case .sodiumInitializationFailed:
       "libsodium initialization failed"
     case .streamInitializationFailed:
@@ -360,8 +349,12 @@ extension XChatError.InternalFailure: CustomStringConvertible {
       "Secretstream encryption failed"
     case .secretboxEncryptionFailed:
       "Secretbox encryption failed"
-    case .invalidSigningPrivateKey:
-      "Invalid signing key: not a P-256 private key"
+    case .keyAgreementFailed:
+      "P-256 key agreement failed"
+    case .gcmEncryptionFailed:
+      "AES-GCM encryption failed"
+    case .signingFailed:
+      "ECDSA signing failed"
     case .unexpected(let description):
       "an error that is not an XChatError was raised inside the SDK: \(description)"
     }

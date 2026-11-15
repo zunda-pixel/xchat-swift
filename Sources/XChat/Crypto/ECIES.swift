@@ -16,7 +16,8 @@ func generateKeyPair() -> (publicKey: [UInt8], privateKey: [UInt8]) {
   return (Array(key.publicKey.x963Representation), Array(key.rawRepresentation))
 }
 
-/// Parses a P-256 public key in compressed SEC1, uncompressed SEC1, or SPKI DER.
+/// Parses a P-256 public key in compressed SEC1, uncompressed SEC1, or SPKI
+/// DER, throwing `PrimitiveError.invalidPublicKey` for anything else.
 func parsePublicKey(_ bytes: [UInt8]) throws -> P256.KeyAgreement.PublicKey {
   let key: P256.KeyAgreement.PublicKey
   do {
@@ -29,13 +30,13 @@ func parsePublicKey(_ bytes: [UInt8]) throws -> P256.KeyAgreement.PublicKey {
       key = try P256.KeyAgreement.PublicKey(derRepresentation: bytes)
     }
   } catch {
-    throw XChatError.invalidInput(.publicKey)
+    throw PrimitiveError.invalidPublicKey
   }
 
   // Swift Crypto can decode a point without checking that its SPKI algorithm
   // identifier names P-256. Require the canonical P-256 encoding used by X.
   guard key.derRepresentation.elementsEqual(bytes) else {
-    throw XChatError.invalidInput(.subjectPublicKeyInfo)
+    throw PrimitiveError.invalidPublicKey
   }
   return key
 }
@@ -71,7 +72,12 @@ func encryptWithPublicKey(publicKey: [UInt8], data: [UInt8]) throws -> [UInt8] {
   // A fresh ephemeral key on every call, so the derived IV never repeats.
   let ephemeral = P256.KeyAgreement.PrivateKey()
   let ephemeralPublicBytes = Array(ephemeral.publicKey.x963Representation)
-  let shared = try ephemeral.sharedSecretFromKeyAgreement(with: recipient)
+  let shared: SharedSecret
+  do {
+    shared = try ephemeral.sharedSecretFromKeyAgreement(with: recipient)
+  } catch {
+    throw XChatError.internalError(.keyAgreementFailed)
+  }
 
   let material = shared.x963DerivedSymmetricKey(
     using: SHA256.self, sharedInfo: ephemeralPublicBytes, outputByteCount: 32)
@@ -86,7 +92,7 @@ func encryptWithPublicKey(publicKey: [UInt8], data: [UInt8]) throws -> [UInt8] {
 func decryptWithPrivateKey(privateKey: [UInt8], data: [UInt8]) throws -> [UInt8] {
   // Minimum size: ephemeral public key (65) + tag (16).
   guard data.count >= 81 else {
-    throw XChatError.decryption(.ciphertextTooShort)
+    throw PrimitiveError.ciphertextTooShort
   }
 
   let ephemeralPublicBytes = Array(data[0..<65])
@@ -94,55 +100,58 @@ func decryptWithPrivateKey(privateKey: [UInt8], data: [UInt8]) throws -> [UInt8]
   do {
     ephemeral = try P256.KeyAgreement.PublicKey(x963Representation: ephemeralPublicBytes)
   } catch {
-    throw XChatError.invalidInput(.ephemeralPublicKey)
+    // Corrupting the ephemeral key's bytes either leaves no point, as here,
+    // or another point, whose shared secret fails the tag; both are
+    // ciphertext that does not open.
+    throw PrimitiveError.authenticationFailed
   }
   let secret = try parsePrivateKey(privateKey)
-  let shared = try secret.sharedSecretFromKeyAgreement(with: ephemeral)
+  let shared: SharedSecret
+  do {
+    shared = try secret.sharedSecretFromKeyAgreement(with: ephemeral)
+  } catch {
+    throw XChatError.internalError(.keyAgreementFailed)
+  }
 
   let material = shared.x963DerivedSymmetricKey(
     using: SHA256.self, sharedInfo: ephemeralPublicBytes, outputByteCount: 32)
   let derived = unsafe material.withUnsafeBytes { unsafe Array($0) }
   let cipher = AES128GCM(key: Array(derived[0..<16]))
-  do {
-    return try cipher.open(
-      nonce: Array(derived[16..<32]), ciphertextAndTag: Array(data[65...]))
-  } catch {
-    throw XChatError.decryption(.authenticationFailed)
-  }
+  return try cipher.open(nonce: Array(derived[16..<32]), ciphertextAndTag: Array(data[65...]))
 }
 
 /// Signs `payload` with ECDSA P-256 over SHA-256, returning the raw 64-byte
-/// `r || s` signature.
+/// `r || s` signature. The key is one `importKeys` or `generateKeypairs`
+/// already accepted, so a failure is the SDK's.
 func sign(privateKey: [UInt8], payload: [UInt8]) throws -> [UInt8] {
-  let key: P256.Signing.PrivateKey
   do {
-    key = try P256.Signing.PrivateKey(rawRepresentation: privateKey)
+    let key = try P256.Signing.PrivateKey(rawRepresentation: privateKey)
+    return Array(try key.signature(for: Data(payload)).rawRepresentation)
   } catch {
-    throw XChatError.internalError(.invalidSigningPrivateKey)
+    throw XChatError.internalError(.signingFailed)
   }
-  let signature = try key.signature(for: Data(payload))
-  return Array(signature.rawRepresentation)
 }
 
 /// Verifies a raw 64-byte `r || s` ECDSA P-256 SHA-256 signature. Returns
 /// false for a signature that does not match; throws only when the public
-/// key or signature is malformed.
+/// key (`PrimitiveError.invalidPublicKey`) or the signature
+/// (`PrimitiveError.malformedSignature`) is malformed.
 func verify(publicKey: [UInt8], signature: [UInt8], payload: [UInt8]) throws -> Bool {
   guard signature.count == 64 else {
-    throw XChatError.verification(.malformedSignature)
+    throw PrimitiveError.malformedSignature
   }
   let publicPoint = try parsePublicKey(publicKey)
   let key: P256.Signing.PublicKey
   do {
     key = try P256.Signing.PublicKey(x963Representation: publicPoint.x963Representation)
   } catch {
-    throw XChatError.invalidInput(.publicKey)
+    throw PrimitiveError.invalidPublicKey
   }
   let parsed: P256.Signing.ECDSASignature
   do {
     parsed = try P256.Signing.ECDSASignature(rawRepresentation: signature)
   } catch {
-    throw XChatError.verification(.malformedSignature)
+    throw PrimitiveError.malformedSignature
   }
   return key.isValidSignature(parsed, for: Data(payload))
 }

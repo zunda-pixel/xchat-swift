@@ -10,10 +10,9 @@ enum SecretStreamTag: UInt8, Sendable {
 struct SecretStreamPush: Sendable {
   private var state: crypto_secretstream_xchacha20poly1305_state
 
+  /// Starts a stream under a 32-byte key, which the caller has checked.
   static func start(key: [UInt8]) throws -> (header: [UInt8], stream: SecretStreamPush) {
-    guard key.count == 32 else {
-      throw XChatError.invalidInput(.conversationKeyLength(key.count))
-    }
+    precondition(key.count == 32, "secretstream keys are 32 bytes")
     guard sodiumReady else { throw XChatError.internalError(.sodiumInitializationFailed) }
     var state = crypto_secretstream_xchacha20poly1305_state()
     var header = [UInt8](repeating: 0, count: 24)
@@ -25,10 +24,19 @@ struct SecretStreamPush: Sendable {
   mutating func push(
     _ plaintext: [UInt8], associatedData: [UInt8] = [], tag: SecretStreamTag
   ) throws -> [UInt8] {
+    try push(plaintext, associatedData: associatedData, rawTag: tag.rawValue)
+  }
+
+  /// Pushes a frame with any tag byte. libsodium authenticates whatever tag
+  /// a sender writes, so a reader must handle tags the format does not
+  /// define; this writes them.
+  mutating func push(
+    _ plaintext: [UInt8], associatedData: [UInt8] = [], rawTag: UInt8
+  ) throws -> [UInt8] {
     var frame = [UInt8](repeating: 0, count: plaintext.count + 17)
     let status = unsafe crypto_secretstream_xchacha20poly1305_push(
       &state, &frame, nil, plaintext, UInt64(plaintext.count),
-      associatedData, UInt64(associatedData.count), tag.rawValue)
+      associatedData, UInt64(associatedData.count), rawTag)
     guard status == 0 else { throw XChatError.internalError(.streamEncryptionFailed) }
     return frame
   }
@@ -37,23 +45,24 @@ struct SecretStreamPush: Sendable {
 struct SecretStreamPull: Sendable {
   private var state: crypto_secretstream_xchacha20poly1305_state
 
+  /// Starts reading a stream under a 32-byte key from its 24-byte header,
+  /// both of which the caller has checked.
   init(header: [UInt8], key: [UInt8]) throws {
-    guard key.count == 32 else {
-      throw XChatError.invalidInput(.conversationKeyLength(key.count))
-    }
-    guard header.count == 24 else {
-      throw XChatError.invalidInput(.streamHeaderLength(header.count))
-    }
+    precondition(key.count == 32, "secretstream keys are 32 bytes")
+    precondition(header.count == 24, "secretstream headers are 24 bytes")
     guard sodiumReady else { throw XChatError.internalError(.sodiumInitializationFailed) }
     state = crypto_secretstream_xchacha20poly1305_state()
+    // libsodium accepts any 24 bytes as a header, so a failure is its own.
     let status = unsafe crypto_secretstream_xchacha20poly1305_init_pull(&state, header, key)
-    guard status == 0 else { throw XChatError.decryption(.invalidStreamHeader) }
+    guard status == 0 else { throw XChatError.internalError(.streamInitializationFailed) }
   }
 
+  /// Decrypts one frame, advancing the stream only when it authenticates
+  /// and carries a tag the format defines.
   mutating func pull(
     _ frame: [UInt8], associatedData: [UInt8] = []
   ) throws -> (plaintext: [UInt8], tag: SecretStreamTag) {
-    guard frame.count >= 17 else { throw XChatError.decryption(.ciphertextTooShort) }
+    guard frame.count >= 17 else { throw PrimitiveError.ciphertextTooShort }
     let count = frame.count - 17
     var plaintext = [UInt8](repeating: 0, count: max(1, count))
     var rawTag: UInt8 = 0
@@ -61,9 +70,9 @@ struct SecretStreamPull: Sendable {
     let status = unsafe crypto_secretstream_xchacha20poly1305_pull(
       &nextState, &plaintext, nil, &rawTag, frame, UInt64(frame.count),
       associatedData, UInt64(associatedData.count))
-    guard status == 0 else { throw XChatError.decryption(.authenticationFailed) }
+    guard status == 0 else { throw PrimitiveError.authenticationFailed }
     guard let tag = SecretStreamTag(rawValue: rawTag) else {
-      throw XChatError.decryption(.unknownStreamTag(rawTag))
+      throw PrimitiveError.unknownStreamTag(rawTag)
     }
     state = nextState
     return (Array(plaintext.prefix(count)), tag)

@@ -221,6 +221,8 @@ public struct FileDecryptor {
       let (framePlaintext, tag): ([UInt8], SecretStreamTag)
       do {
         (framePlaintext, tag) = try pullFrame(frame)
+      } catch PrimitiveError.unknownStreamTag(let tag) {
+        throw fault(.unknownTag(tag))
       } catch {
         throw fault(.authenticationFailed)
       }
@@ -253,6 +255,8 @@ public struct FileDecryptor {
       let (framePlaintext, tag): ([UInt8], SecretStreamTag)
       do {
         (framePlaintext, tag) = try pullFrame(frame)
+      } catch PrimitiveError.unknownStreamTag(let tag) {
+        throw fault(.unknownTag(tag))
       } catch {
         throw fault(.lastFrameAuthenticationFailed)
       }

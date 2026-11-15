@@ -377,6 +377,39 @@ final class SendTests: XCTestCase {
     XCTAssertEqual(batch.conversationKeys.latestVersion, "5000")
   }
 
+  /// An identity key the conversation key cannot be encrypted to names the
+  /// participant it belongs to, whether it is not base64, not a P-256
+  /// point, or an SPKI naming another curve.
+  func testKeyChangeNamesTheParticipantWithABadKey() throws {
+    let (core, _) = try makeCore()
+    var otherCurve = try spkiDER(publicKey: generateKeyPair().publicKey)
+    // The last arc of the named-curve OID.
+    otherCurve[22] = 0x02
+    let badKeys = [
+      "not base64!",
+      Base64.encodeStandard([0x04] + [UInt8](repeating: 0, count: 64)),
+      Base64.encodeStandard(otherCurve),
+    ]
+    for badKey in badKeys {
+      XCTAssertThrowsError(
+        try core.prepareConversationKeyChange(
+          participants: [
+            ConversationParticipantPublicKey(
+              userId: Self.senderId,
+              identityPublicKey: TestVectors.string("identity_public_b64"),
+              publicKeyVersion: "1"),
+            ConversationParticipantPublicKey(
+              userId: "2222", identityPublicKey: badKey, publicKeyVersion: "1"),
+          ],
+          senderId: Self.senderId, conversationKeyVersion: "5000"),
+        badKey
+      ) { error in
+        XCTAssertEqual(
+          error as? XChatError, .invalidInput(.participantIdentityKey(userId: "2222")), badKey)
+      }
+    }
+  }
+
   // MARK: Validation
 
   func testSendValidation() throws {

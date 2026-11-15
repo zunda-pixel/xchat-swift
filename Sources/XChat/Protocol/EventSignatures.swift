@@ -214,7 +214,7 @@ func checkEventSignature(
       return .verified
     }
     return .failed(.mismatch(keyVersion: keyVersion))
-  } catch XChatError.verification(.malformedSignature) {
+  } catch PrimitiveError.malformedSignature {
     return .failed(.malformedSignature)
   } catch {
     // Everything else `verify` and the base64 decoding throw is about the

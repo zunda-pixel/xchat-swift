@@ -125,7 +125,7 @@ final class SecretStreamTests: XCTestCase {
 
     var pull = try SecretStreamPull(header: header, key: key)
     XCTAssertThrowsError(try pull.pull(frame, associatedData: Array("wrong".utf8))) { error in
-      XCTAssertEqual(error as? XChatError, .decryption(.authenticationFailed))
+      XCTAssertEqual(error as? PrimitiveError, .authenticationFailed)
     }
   }
 
@@ -165,34 +165,22 @@ final class SecretStreamTests: XCTestCase {
     for length in [0, 1, 16] {
       var pull = try SecretStreamPull(header: header, key: key)
       XCTAssertThrowsError(try pull.pull([UInt8](repeating: 0, count: length))) { error in
-        XCTAssertEqual(error as? XChatError, .decryption(.ciphertextTooShort))
+        XCTAssertEqual(error as? PrimitiveError, .ciphertextTooShort)
       }
     }
   }
 
-  /// Invalid key and header lengths are input errors naming the value.
-  func testInvalidLengths() throws {
-    for length in [0, 16, 31, 33] {
-      XCTAssertThrowsError(try SecretStreamPush.start(key: [UInt8](repeating: 0, count: length))) {
-        error in
-        XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(length)))
-      }
-      XCTAssertThrowsError(
-        try SecretStreamPull(
-          header: [UInt8](repeating: 0, count: 24),
-          key: [UInt8](repeating: 0, count: length))
-      ) { error in
-        XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(length)))
-      }
-    }
-    for length in [0, 23, 25] {
-      XCTAssertThrowsError(
-        try SecretStreamPull(
-          header: [UInt8](repeating: 0, count: length),
-          key: [UInt8](repeating: 0, count: 32))
-      ) { error in
-        XCTAssertEqual(error as? XChatError, .invalidInput(.streamHeaderLength(length)))
-      }
+  /// libsodium authenticates any tag byte a sender writes; a frame whose tag
+  /// the format does not define is refused without advancing the stream.
+  func testUndefinedTagRejected() throws {
+    let key = TestVectors.bytes("conversation_key_b64")
+    let (header, pusher) = try SecretStreamPush.start(key: key)
+    var push = pusher
+    let frame = try push.push([1, 2, 3], rawTag: 0x10)
+
+    var pull = try SecretStreamPull(header: header, key: key)
+    XCTAssertThrowsError(try pull.pull(frame)) { error in
+      XCTAssertEqual(error as? PrimitiveError, .unknownStreamTag(0x10))
     }
   }
 }

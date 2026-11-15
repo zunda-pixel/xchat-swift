@@ -19,7 +19,7 @@ extension XChatCore {
     ttlMilliseconds: Int64? = nil
   ) throws -> EncryptedMessagePayload {
     let version = sendVersion
-    let messageId = try outgoingMessageId(
+    let messageId = outgoingMessageId(
       version: version, conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       conversationId: conversationId, attachments: attachments)
@@ -57,7 +57,7 @@ extension XChatCore {
     replyToConversationKeys: [String: [UInt8]] = [:]
   ) throws -> EncryptedMessagePayload {
     let version = sendVersion
-    let messageId = try outgoingMessageId(
+    let messageId = outgoingMessageId(
       version: version, conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       conversationId: conversationId, attachments: attachments)
@@ -217,8 +217,13 @@ extension XChatCore {
     var participantKeys: [ParticipantKey] = []
     for userId in order {
       guard let participant = best[userId] else { continue }
-      let publicKey = try Base64.decodeStandard(participant.identityPublicKey)
-      let encrypted = try encryptWithPublicKey(publicKey: publicKey, data: conversationKey)
+      let encrypted: [UInt8]
+      do {
+        let publicKey = try Base64.decodeStandard(participant.identityPublicKey)
+        encrypted = try encryptWithPublicKey(publicKey: publicKey, data: conversationKey)
+      } catch XChatError.parse(.base64(_)), PrimitiveError.invalidPublicKey {
+        throw XChatError.invalidInput(.participantIdentityKey(userId: userId))
+      }
       participantKeys.append(
         ParticipantKey(
           userId: userId,
@@ -339,7 +344,7 @@ extension XChatCore {
       signatureVersion = currentSignatureVersion
     case .v1:
       guard
-        let messageKey = try deriveMessageKey(
+        let messageKey = deriveMessageKey(
           conversationKey: conversationKey, senderId: senderId, messageId: messageId)
       else {
         throw XChatError.invalidInput(.senderId(senderId))
@@ -431,13 +436,13 @@ extension XChatCore {
     senderId: String,
     conversationId: String,
     attachments: [AttachmentDescriptor]?
-  ) throws -> String {
+  ) -> String {
     let mediaHashKeys = fileMediaHashKeys(attachments ?? [])
     if version == .v0 || mediaHashKeys.isEmpty {
       return generateMessageId()
     }
     let canonicalId = canonicalConversationId(conversationId, senderId: senderId)
-    return try deriveMediaMessageId(
+    return deriveMediaMessageId(
       conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion,
       senderId: senderId, conversationId: canonicalId,
