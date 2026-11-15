@@ -61,10 +61,12 @@ public struct FileEncryptor: ~Copyable {
   /// Set after emitting the last frame.
   private var finished: Bool
 
-  /// Creates an encryptor for one file under a 32-byte conversation key.
+  /// Creates an encryptor for one file under a 32-byte key: a key the
+  /// caller holds, as `encryptFileWithKey` takes, or the key `fileEncryptor`
+  /// derives for a message's file.
   public init(key: [UInt8]) throws {
     guard key.count == 32 else {
-      throw XChatError.invalidInput(.conversationKeyLength(key.count))
+      throw XChatError.invalidInput(.fileKeyLength(key.count))
     }
     let (header, pusher) = try SecretStreamPush.start(key: key)
     stream = pusher
@@ -140,19 +142,20 @@ public struct FileDecryptor {
   /// Set by `finish`, which consumes the decryptor in the reference API.
   private var finished: Bool
 
-  /// Creates a decryptor for one file under a 32-byte conversation key.
+  /// Creates a decryptor for one file under a 32-byte key the caller
+  /// holds, as `decryptFileWithKey` takes.
   public init(key: [UInt8]) throws {
     guard key.count == 32 else {
-      throw XChatError.invalidInput(.conversationKeyLength(key.count))
+      throw XChatError.invalidInput(.fileKeyLength(key.count))
     }
     self.init(validatedKey: key, mediaHashKey: nil)
   }
 
-  /// Creates a decryptor for the media file named by `mediaHashKey`,
-  /// whose decryption errors carry that media hash key.
+  /// Creates a decryptor for the media file named by `mediaHashKey`, under
+  /// its 32-byte key, whose decryption errors carry that media hash key.
   public init(key: [UInt8], mediaHashKey: String) throws {
     guard key.count == 32 else {
-      throw XChatError.invalidInput(.conversationKeyLength(key.count))
+      throw XChatError.invalidInput(.fileKeyLength(key.count))
     }
     self.init(validatedKey: key, mediaHashKey: mediaHashKey)
   }

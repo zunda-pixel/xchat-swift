@@ -77,7 +77,7 @@ extension XChatError.InputFailure {
     case .conversationKeyLength(let length):
       "Conversation key must be 32 bytes, got \(length)"
     case .fileKeyLength(let length):
-      "Invalid key (expected 32 bytes, got \(length))"
+      "File key must be 32 bytes, got \(length)"
     case .privateKey:
       "Invalid private key: not a P-256 scalar"
     case .publicKeyVersion(let version):

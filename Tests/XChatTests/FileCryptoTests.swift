@@ -319,20 +319,25 @@ final class FileCryptoTests: XCTestCase {
 
   // MARK: Input and state validation
 
-  /// Keys must be 32 bytes at every entry point.
+  /// Keys must be 32 bytes at every entry point, and a key of another
+  /// length is reported as the file's key, as `encryptFileWithKey` and
+  /// `decryptFileWithKey` report it.
   func testKeyLengthValidation() {
     for length in [0, 16, 31, 33] {
       let key = [UInt8](repeating: 0, count: length)
-      assertThrows(.invalidInput(.conversationKeyLength(length))) {
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
         _ = try FileEncryptor(key: key)
       }
-      assertThrows(.invalidInput(.conversationKeyLength(length))) {
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
         try FileDecryptor(key: key)
       }
-      assertThrows(.invalidInput(.conversationKeyLength(length))) {
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
+        try FileDecryptor(key: key, mediaHashKey: "h")
+      }
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
         try encryptFile(key: key, plaintext: [1])
       }
-      assertThrows(.invalidInput(.conversationKeyLength(length))) {
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
         try decryptFile(key: key, ciphertext: [1])
       }
     }

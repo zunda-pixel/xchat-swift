@@ -67,15 +67,13 @@ extension XChatCore {
   /// format `encryptedFileSize` describes, with nothing derived from a
   /// message.
   public func encryptFileWithKey(_ file: [UInt8], key: [UInt8]) throws -> [UInt8] {
-    try requireFileKey(key)
-    return try XChat.encryptFile(key: key, plaintext: file)
+    try XChat.encryptFile(key: key, plaintext: file)
   }
 
   /// Decrypts a file encrypted under a key the caller holds, such as a
   /// group's avatar image under its conversation key.
   public func decryptFileWithKey(_ encrypted: [UInt8], key: [UInt8]) throws -> [UInt8] {
-    try requireFileKey(key)
-    return try XChat.decryptFile(key: key, ciphertext: encrypted)
+    try XChat.decryptFile(key: key, ciphertext: encrypted)
   }
 
   // MARK: Key resolution
@@ -325,11 +323,5 @@ extension XChatCore {
       throw XChatError.decryption(.missingSenderOrMessageId(role))
     }
     return messageId
-  }
-
-  private func requireFileKey(_ key: [UInt8]) throws {
-    guard key.count == 32 else {
-      throw XChatError.invalidInput(.fileKeyLength(key.count))
-    }
   }
 }

@@ -63,10 +63,13 @@ extension XChatError {
   public enum InputFailure: Sendable, Hashable {
     // Keys
 
-    /// A conversation key is not 32 bytes; the value is its length.
+    /// The conversation key a send or an outgoing file is made under is
+    /// not 32 bytes; the value is its length.
     case conversationKeyLength(Int)
-    /// A key passed to `encryptFileWithKey` or `decryptFileWithKey` is not
-    /// 32 bytes; the value is its length.
+    /// A file's key is not 32 bytes; the value is its length. It is the key
+    /// passed to `encryptFileWithKey`, `decryptFileWithKey`, or to
+    /// `FileEncryptor` or `FileDecryptor` directly, even when that key is
+    /// a conversation key, such as the key of a group's avatar image.
     case fileKeyLength(Int)
     /// A private key is not a 32-byte P-256 scalar in `[1, n-1]`.
     case privateKey
