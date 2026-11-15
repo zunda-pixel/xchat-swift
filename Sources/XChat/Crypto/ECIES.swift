@@ -157,17 +157,19 @@ func sign(privateKey: [UInt8], payload: [UInt8]) throws -> [UInt8] {
 /// Verifies a raw 64-byte `r || s` ECDSA P-256 SHA-256 signature. Returns
 /// false for a signature that does not match; throws only when the public
 /// key (`PrimitiveError.invalidPublicKey`) or the signature
-/// (`PrimitiveError.malformedSignature`) is malformed.
+/// (`PrimitiveError.malformedSignature`) is malformed. The key is checked
+/// before the signature, so when both are malformed the key is reported,
+/// as `XChatError.SignatureFailure` documents.
 func verify(publicKey: [UInt8], signature: [UInt8], payload: [UInt8]) throws -> Bool {
-  guard signature.count == 64 else {
-    throw PrimitiveError.malformedSignature
-  }
   let publicPoint = try parsePublicKey(publicKey)
   let key: P256.Signing.PublicKey
   do {
     key = try P256.Signing.PublicKey(x963Representation: publicPoint.x963Representation)
   } catch {
     throw PrimitiveError.invalidPublicKey
+  }
+  guard signature.count == 64 else {
+    throw PrimitiveError.malformedSignature
   }
   let parsed: P256.Signing.ECDSASignature
   do {

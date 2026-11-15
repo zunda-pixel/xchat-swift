@@ -394,6 +394,57 @@ final class PipelineTests: XCTestCase {
       batch.errors, [0: .verification(.rejected(.keyChange, .invalidSigningPublicKey))])
   }
 
+  /// When both the signing key and the signature are malformed, the key is
+  /// reported, however each is malformed: the key is checked before the
+  /// signature.
+  func testAMalformedSigningKeyIsReportedBeforeAMalformedSignature() throws {
+    let senderId = TestVectors.string("event_sender_id")
+    let keyVersion = TestVectors.string("event_signing_key_version")
+    let keys = ["1001": TestVectors.bytes("conversation_key_b64")]
+    let badKeys = [
+      "not base64!",
+      Base64.encodeStandard([0x04] + [UInt8](repeating: 0, count: 64)),
+    ]
+    let badSignatures = [
+      Base64.encodeStandard([1, 2, 3]),
+      Base64.encodeStandard([UInt8](repeating: 1, count: 65)),
+      "not base64!",
+    ]
+    func decrypt(signature: String, signingKey: SigningKeyEntry) throws {
+      var event = try XChatCore().parseEvent(TestVectors.string("event_message_b64"))
+      event.messageEventSignature?.signature = signature
+      _ = try XChatCore().decryptEvent(
+        encodeEvent(event), conversationKeys: keys, signingKeys: [signingKey])
+    }
+
+    for badKey in badKeys {
+      let signingKey = SigningKeyEntry(
+        userId: senderId, publicKeyVersion: keyVersion, publicKey: badKey)
+      for badSignature in badSignatures {
+        let name = "\(badKey), \(badSignature)"
+        XCTAssertThrowsError(
+          try decrypt(signature: badSignature, signingKey: signingKey), name
+        ) { error in
+          XCTAssertEqual(
+            error as? XChatError, .verification(.rejected(.message, .invalidSigningPublicKey)),
+            name)
+        }
+      }
+    }
+
+    // With the key right, each of those signatures is malformed.
+    for badSignature in badSignatures {
+      XCTAssertThrowsError(
+        try decrypt(signature: badSignature, signingKey: signingKey(userId: senderId)),
+        badSignature
+      ) { error in
+        XCTAssertEqual(
+          error as? XChatError, .verification(.rejected(.message, .malformedSignature)),
+          badSignature)
+      }
+    }
+  }
+
   /// A batch holds only XChatError values; an error of another type would
   /// be kept as its description rather than dropped.
   func testOtherErrorsBecomeUnexpectedWithTheirDescription() {

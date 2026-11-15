@@ -5,6 +5,11 @@ public import Foundation
 /// not these strings, are what callers match on, and an app shows its own
 /// text for the cases it handles.
 ///
+/// Every description is a sentence that starts with a capital letter. What
+/// a nested value adds after a colon (an attachment's fault, a Thrift
+/// failure, a signature failure) is a fragment that starts as it would
+/// mid-sentence, often with a field name as the other bindings write it.
+///
 /// Only `XChatError` describes itself in English. Its nested enums print as
 /// Swift writes their cases, and its debug description is the expression
 /// that builds it, so a value in a log or the debugger shows the case to
@@ -104,12 +109,12 @@ extension XChatError.InputFailure {
       "Invalid public_keys public_key_version '\(value)': pass the key version as the X "
         + "API returns it, an integer in digits"
     case .participantIdentityKey(let userId):
-      "the identity public key of participant \(userId) is not the base64 of a P-256 public "
+      "The identity public key of participant \(userId) is not the base64 of a P-256 public "
         + "key in SEC1 or SPKI DER"
     case .noParticipants:
-      "public_keys must not be empty"
+      "Invalid public_keys: must not be empty"
     case .conversationIdNotDerivable(let distinctUsers):
-      "cannot derive a one-to-one conversation id from \(distinctUsers) distinct user(s); "
+      "Cannot derive a one-to-one conversation id from \(distinctUsers) distinct user(s); "
         + "pass conversation_id explicitly for group conversations"
     case .signaturePayloadContainsComma:
       "Signature payload contains comma-separated component"
@@ -122,36 +127,38 @@ extension XChatError.InputFailure {
     case .emptyReactionEmoji:
       "Invalid reaction emoji: must not be empty"
     case .notMessageEvent(.message):
-      "the event is not a message: pass the event of a message"
+      "The event is not a message: pass the event of a message"
     case .notMessageEvent(.quotedMessage):
-      "the quoted event is not a message: pass the event of a message"
+      "The quoted event is not a message: pass the event of a message"
     case .messageIsEdit(let role):
-      "\(role.noun) is an edit, which carries neither the edited message's text nor its "
+      "\(role.subject) is an edit, which carries neither the edited message's text nor its "
         + "media"
     case .notTextMessage(let role):
-      "\(role.noun) is a reaction, read marker, or other entry, not a text message"
+      "\(role.subject) is a reaction, read marker, or other entry, not a text message"
     case .notEncrypted(let role):
-      "\(role.noun) is not encrypted, so neither is its media"
+      "\(role.subject) is not encrypted, so neither is its media"
     case .noContents(let role):
-      "\(role.noun) has no contents"
+      "\(role.subject) has no contents"
     case .noSequenceId(let role):
-      "\(role.noun) carries no sequence_id"
+      "\(role.subject) carries no sequence_id"
     case .quotedMessageNotEmbedded:
-      "the reply does not embed the message it quotes, so that message can't be opened "
+      "The reply does not embed the message it quotes, so that message can't be opened "
         + "through the reply: pass the quoted message's own event"
     case .quotedMessageInOtherConversation:
-      "the quoted message belongs to a different conversation than the reply"
+      "The quoted message belongs to a different conversation than the reply"
     case .emptyMediaHashKey:
-      "media_hash_key is empty: pass the media hash key of the attachment, as the "
-        + "message lists it"
+      "Empty media_hash_key: pass the media hash key of the attachment, as the message "
+        + "lists it"
     case .mediaHashKeyNotFound(let mediaHashKey, let available) where available.isEmpty:
-      "media_hash_key '\(mediaHashKey)' is not among the media hash keys this call can use: "
+      "The media_hash_key '\(mediaHashKey)' is not among the media hash keys this call can "
+        + "use: "
         + "there are none"
     case .mediaHashKeyNotFound(let mediaHashKey, let available):
-      "media_hash_key '\(mediaHashKey)' is not among the media hash keys this call can use: "
+      "The media_hash_key '\(mediaHashKey)' is not among the media hash keys this call can "
+        + "use: "
         + available.joined(separator: ", ")
     case .quotedMediaHashKey(let mediaHashKey):
-      "media_hash_key '\(mediaHashKey)' is media the reply quotes: its file belongs to "
+      "The media_hash_key '\(mediaHashKey)' is media the reply quotes: its file belongs to "
         + "the quoted message and was uploaded with it, so there is nothing to encrypt"
     case .fileEncryptorFinished:
       "File encryptor already finished"
@@ -165,19 +172,38 @@ extension XChatError.AttachmentFailure {
   var explanation: String {
     switch self {
     case .emptyMediaHashKey: "media_hash_key must not be empty"
-    case .negativeDimensions: "width and height must not be negative"
+    case .negativeWidth: "width must not be negative"
+    case .negativeHeight: "height must not be negative"
     case .nonPositiveFilesize: "filesize_bytes must be positive"
     case .emptyFilename: "filename must not be empty"
     case .unknownMediaType(let mediaType): "media_type \(mediaType) is not a media type"
     case .plaintextSHA256:
       "plaintext_sha256 must be the base64 SHA-256 of the file's plaintext bytes"
     case .emptyURL: "url must not be empty"
+    case .cardImage(let image, let failure): "\(image.field).\(failure.explanation)"
     case .postWithoutReference: "a post needs rest_id, post_url, or both"
-    case .imageEmptyMediaHashKey: "image media_hash_key must not be empty"
-    case .imageNonPositiveFilesize: "image filesize_bytes must be positive"
-    case .imageEmptyFilename: "image filename must not be empty"
-    case .imageNegativeWidth: "image width must not be negative"
-    case .imageNegativeHeight: "image height must not be negative"
+    }
+  }
+}
+
+extension XChatError.CardImageFailure {
+  var explanation: String {
+    switch self {
+    case .emptyMediaHashKey: "media_hash_key must not be empty"
+    case .nonPositiveFilesize: "filesize_bytes must be positive"
+    case .emptyFilename: "filename must not be empty"
+    case .negativeWidth: "width must not be negative"
+    case .negativeHeight: "height must not be negative"
+    }
+  }
+}
+
+extension XChatError.CardImage {
+  /// The image's field in a URL attachment, as the other bindings name it.
+  var field: String {
+    switch self {
+    case .banner: "banner_image"
+    case .favicon: "favicon_image"
     }
   }
 }
@@ -188,6 +214,14 @@ extension XChatError.MessageRole {
     switch self {
     case .message: "the message"
     case .quotedMessage: "the quoted message"
+    }
+  }
+
+  /// The message as a sentence that starts with it names it.
+  var subject: String {
+    switch self {
+    case .message: "The message"
+    case .quotedMessage: "The quoted message"
     }
   }
 }
@@ -205,10 +239,10 @@ extension XChatError.KeyPurpose {
 extension XChatError.StateFailure {
   var explanation: String {
     switch self {
-    case .keysNotLoaded: "keys are not loaded: import keys first"
-    case .signingKeyNotLoaded: "signing key is not loaded"
+    case .keysNotLoaded: "Keys are not loaded: import keys first"
+    case .signingKeyNotLoaded: "Signing key is not loaded"
     case .signingKeyVersionNotSet:
-      "signing key version is not set: import keys with their public key version, or set "
+      "Signing key version is not set: import keys with their public key version, or set "
         + "it with setPublicKeyVersion"
     }
   }
@@ -232,7 +266,9 @@ extension XChatError.Base64Failure {
     switch self {
     case .dataAfterPadding: "Invalid base64: '=' is followed by data"
     case .invalidByte(let byte): "Invalid base64 byte: \(describeByte(byte))"
-    case .invalidLength(let length): "Invalid base64 length: \(length)"
+    case .invalidLength(let length):
+      "Invalid base64 length: \(length) characters, not counting '=', which no bytes encode to"
+    case .excessPadding(let count): "Invalid base64 padding: \(count) '=', at most 2"
     }
   }
 }
@@ -267,25 +303,25 @@ extension XChatError.ThriftFailure {
   var explanation: String {
     switch self {
     case .unexpectedEnd:
-      "Thrift input ended unexpectedly"
+      "input ended unexpectedly"
     case .unknownType(let wire):
-      "Thrift input has an unknown type: \(hex(wire))"
+      "unknown type byte \(hex(wire))"
     case .negativeSize(let type, let size):
-      "Thrift \(type) has a negative size: \(size)"
+      "\(type) has a negative size: \(size)"
     case .sizeExceedsMaximum(let type, let size, let maximum):
-      "Thrift \(type) size \(size) exceeds maximum \(maximum)"
+      "\(type) size \(size) exceeds maximum \(maximum)"
     case .totalElementsExceedMaximum(let total, let maximum):
-      "Thrift cumulative container elements \(total) exceed maximum \(maximum)"
+      "cumulative container elements \(total) exceed maximum \(maximum)"
     case .nestingTooDeep(let maximum):
-      "Thrift nesting exceeds maximum depth \(maximum)"
+      "nesting exceeds maximum depth \(maximum)"
     case .invalidUTF8:
-      "Thrift input has invalid UTF-8"
+      "input has invalid UTF-8"
     case .fieldType(let field, let id, let actual, let expected):
-      "Thrift field \(field) (#\(id)) is \(actual), expected \(expected)"
+      "field \(field) (#\(id)) is \(actual), expected \(expected)"
     case .listElementType(let field, let actual, let expected):
-      "Thrift list \(field) has element type \(actual), expected \(expected)"
+      "list \(field) has element type \(actual), expected \(expected)"
     case .mapTypes(let field, let key, let value):
-      "Thrift map \(field) is \(key) to \(value), expected string to string"
+      "map \(field) is \(key) to \(value), expected string to string"
     case .messageAttachmentWithoutVariant:
       "message attachment carries no variant"
     case .previewAttachmentWithoutVariant:
@@ -304,16 +340,17 @@ extension XChatError.DecryptionFailure {
     case .file(let fault, nil):
       Self.describe(fault)
     case .missingConversationKey(let role, let version, let available) where available.isEmpty:
-      "\(role.noun) is encrypted under conversation-key version '\(version)', and no "
-        + "conversation keys were given"
+      "\(role.subject) is encrypted under conversation-key version '\(version)', and there "
+        + "were no conversation keys"
     case .missingConversationKey(let role, let version, let available):
-      "\(role.noun) is encrypted under conversation-key version '\(version)', and no key "
-        + "was given for it; keys were given for versions \(available.joined(separator: ", "))"
+      "\(role.subject) is encrypted under conversation-key version '\(version)', and there "
+        + "was no key for it; there were keys for versions "
+        + available.joined(separator: ", ")
     case .missingSenderOrMessageId(let role):
-      "\(role.noun) uses per-message keys, which derive from its event's sender id and "
+      "\(role.subject) uses per-message keys, which derive from its event's sender id and "
         + "message id, and the event lacks one of them"
     case .nonNumericSenderId(let role, let senderId):
-      "\(role.noun) uses a per-message key, which derives from its sender id as a 64-bit "
+      "\(role.subject) uses a per-message key, which derives from its sender id as a 64-bit "
         + "integer, and its event's sender id '\(senderId)' is not one"
     }
   }
@@ -333,30 +370,30 @@ extension XChatError.DecryptionFailure {
       }
     return switch failure {
     case .authenticationFailed:
-      "the contents of \(role.noun) do not decrypt under \(source): it is not the key they "
+      "The contents of \(role.noun) do not decrypt under \(source): it is not the key they "
         + "were encrypted under, or they are corrupted"
     case .ciphertextTooShort:
-      "the contents of \(role.noun) are too short to be encrypted contents"
+      "The contents of \(role.noun) are too short to be encrypted contents"
     case .keyLength(let length):
-      "\(source) is \(length) bytes, not 32, so it cannot decrypt the contents of "
-        + role.noun
+      "The contents of \(role.noun) cannot be decrypted under \(source): it is \(length) "
+        + "bytes, not 32"
     }
   }
 
   private static func describe(_ fault: XChatError.FileFailure) -> String {
     switch fault {
     case .authenticationFailed:
-      "the bytes are not a file encrypted under this key, or they are corrupted: pass "
+      "The bytes are not a file encrypted under this key, or they are corrupted: pass "
         + "the encrypted bytes and the key they were encrypted under"
     case .lastFrameAuthenticationFailed:
-      "the bytes are not the complete file encrypted under this key: they are "
+      "The bytes are not the complete file encrypted under this key: they are "
         + "truncated, corrupted, or another file"
     case .dataAfterFinalFrame:
-      "the bytes continue past the end of the encrypted file: pass only its bytes"
+      "The bytes continue past the end of the encrypted file: pass only its bytes"
     case .truncated:
-      "the encrypted file is truncated: pass all of its bytes"
+      "The encrypted file is truncated: pass all of its bytes"
     case .unknownTag(let tag):
-      "a frame of the encrypted file authenticated but carries tag \(tag), which "
+      "A frame of the encrypted file authenticated but carries tag \(tag), which "
         + "secretstream does not define"
     }
   }
@@ -364,20 +401,20 @@ extension XChatError.DecryptionFailure {
   private static func describe(_ fault: XChatError.FileFailure, mediaHashKey: String) -> String {
     switch fault {
     case .authenticationFailed:
-      "the bytes are not the encrypted file of media_hash_key '\(mediaHashKey)', or they "
+      "The bytes are not the encrypted file of media_hash_key '\(mediaHashKey)', or they "
         + "are corrupted: pass the bytes downloaded for that media hash key"
     case .lastFrameAuthenticationFailed:
-      "the bytes are not the complete encrypted file of media_hash_key '\(mediaHashKey)': "
+      "The bytes are not the complete encrypted file of media_hash_key '\(mediaHashKey)': "
         + "they are truncated, corrupted, or another file; pass the complete bytes "
         + "downloaded for that media hash key"
     case .dataAfterFinalFrame:
-      "the bytes continue past the end of the encrypted file of media_hash_key "
+      "The bytes continue past the end of the encrypted file of media_hash_key "
         + "'\(mediaHashKey)': pass only the bytes downloaded for that media hash key"
     case .truncated:
-      "the bytes of media_hash_key '\(mediaHashKey)' are truncated: pass the complete "
+      "The bytes of media_hash_key '\(mediaHashKey)' are truncated: pass the complete "
         + "bytes downloaded for that media hash key"
     case .unknownTag(let tag):
-      "a frame of the encrypted file of media_hash_key '\(mediaHashKey)' authenticated but "
+      "A frame of the encrypted file of media_hash_key '\(mediaHashKey)' authenticated but "
         + "carries tag \(tag), which secretstream does not define"
     }
   }
@@ -432,7 +469,7 @@ extension XChatError.InternalFailure {
   var explanation: String {
     switch self {
     case .sodiumInitializationFailed:
-      "libsodium initialization failed"
+      "Initializing libsodium failed"
     case .streamInitializationFailed:
       "Secretstream initialization failed"
     case .streamEncryptionFailed:
@@ -446,7 +483,7 @@ extension XChatError.InternalFailure {
     case .signingFailed:
       "ECDSA signing failed"
     case .unexpected(let description):
-      "an error that is not an XChatError was raised inside the SDK: \(description)"
+      "An error that is not an XChatError was raised inside the SDK: \(description)"
     }
   }
 }

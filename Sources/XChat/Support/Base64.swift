@@ -89,8 +89,11 @@ public enum Base64 {
       }
       chars.append(c)
     }
-    if padding > 2 || chars.count % 4 == 1 {
-      throw XChatError.parse(.base64(.invalidLength(chars.count + padding)))
+    if chars.count % 4 == 1 {
+      throw XChatError.parse(.base64(.invalidLength(chars.count)))
+    }
+    if padding > 2 {
+      throw XChatError.parse(.base64(.excessPadding(padding)))
     }
     var out = [UInt8]()
     out.reserveCapacity(chars.count / 4 * 3)

@@ -62,13 +62,18 @@ extension XChatError {
   /// What about a parameter is invalid.
   ///
   /// An event passed to a call is a parameter, and so is a message it
-  /// embeds. A received reply's quoted message that the reply does not
-  /// embed, that is in another conversation, or that is not an encrypted
-  /// text message with contents is reported here, by a case that names the
-  /// quoted message, as the event `encryptReply` is given to quote is: the
-  /// message is well formed but not one the call can use, whoever wrote
-  /// it. Bytes in either message that do not decode are `parse`, and
-  /// contents that do not decrypt are `decryption`.
+  /// embeds. A message that is well formed but not one the call can use is
+  /// reported here, whoever wrote it, by a case that names the message. A
+  /// received reply's quoted message is reported here when the reply does
+  /// not embed it, or when it is in another conversation, not a message
+  /// event, not encrypted, without contents, an edit, or not a text
+  /// message. The event `encryptReply` is given to quote is reported by the
+  /// same cases for the reasons the two share: another conversation, not a
+  /// message event, no contents, an edit, not a text message.
+  /// `encryptReply` quotes an unencrypted message too, and instead needs
+  /// the quoted event's sequence id (`noSequenceId`). Bytes in either
+  /// message that do not decode are `parse`, and contents that do not
+  /// decrypt are `decryption`.
   public enum InputFailure: Sendable, Hashable {
     // Keys
 
@@ -177,12 +182,17 @@ extension XChatError {
     case fileDecryptorFinished
   }
 
-  /// What about an attachment descriptor is invalid.
+  /// What about an attachment descriptor is invalid. The descriptors are
+  /// checked in order, and each one's fields, a URL card's images
+  /// included, in the order they are declared; the first invalid field is
+  /// reported.
   public enum AttachmentFailure: Sendable, Hashable {
     /// A media attachment's media hash key is empty.
     case emptyMediaHashKey
-    /// A media attachment's width or height is negative.
-    case negativeDimensions
+    /// A media attachment's width is negative.
+    case negativeWidth
+    /// A media attachment's height is negative.
+    case negativeHeight
     /// A media attachment's file size is not positive.
     case nonPositiveFilesize
     /// A media attachment's filename is empty.
@@ -195,24 +205,42 @@ extension XChatError {
     case plaintextSHA256
     /// A URL attachment's URL is empty.
     case emptyURL
+    /// An image of a URL card is invalid: the first value says which, the
+    /// second what about it.
+    case cardImage(CardImage, CardImageFailure)
     /// A post attachment has neither a rest id nor a post URL.
     case postWithoutReference
-    /// A URL card image's media hash key is empty.
-    case imageEmptyMediaHashKey
-    /// A URL card image's file size is not positive.
-    case imageNonPositiveFilesize
-    /// A URL card image's filename is empty.
-    case imageEmptyFilename
-    /// A URL card image's width is negative.
-    case imageNegativeWidth
-    /// A URL card image's height is negative.
-    case imageNegativeHeight
+  }
+
+  /// Which image of a URL card an error is about.
+  public enum CardImage: Sendable, Hashable {
+    /// The card's banner image (`bannerImage`).
+    case banner
+    /// The card's favicon (`faviconImage`).
+    case favicon
+  }
+
+  /// What about an image of a URL card is invalid. Its width and height
+  /// are optional; one that is given must not be negative.
+  public enum CardImageFailure: Sendable, Hashable {
+    /// The image's media hash key is empty.
+    case emptyMediaHashKey
+    /// The image's file size is not positive.
+    case nonPositiveFilesize
+    /// The image's filename is empty.
+    case emptyFilename
+    /// The image's width is negative.
+    case negativeWidth
+    /// The image's height is negative.
+    case negativeHeight
   }
 
   /// Which message an error is about: the message whose event was passed,
   /// or the message a reply quotes.
   public enum MessageRole: Sendable, Hashable {
-    /// The message whose event was passed to the call.
+    /// The message whose event was passed to the call. `encryptReply`
+    /// never reports it: the event it is given is the message it quotes
+    /// (`quotedMessage`), and the reply it builds is not opened.
     case message
     /// The message a reply quotes: the event passed to `encryptReply` as
     /// the one it replies to, or the message a received reply embeds in its
@@ -272,15 +300,21 @@ extension XChatError {
     case thrift(ThriftFailure)
   }
 
-  /// Why base64 does not decode.
+  /// Why base64 does not decode. Padding is optional, and up to two `=`
+  /// are accepted whatever the length.
   public enum Base64Failure: Sendable, Hashable {
     /// Data follows `=` padding.
     case dataAfterPadding
     /// A byte is not in the alphabet; the value is that byte.
     case invalidByte(UInt8)
-    /// The length, padding included, is not a base64 length; the value is
-    /// that length.
+    /// The characters before any `=` number one more than a multiple of
+    /// four, which no bytes encode to: the last would carry six bits, less
+    /// than a byte. The value is that number.
     case invalidLength(Int)
+    /// The input ends in more than two `=`, more than any encoding pads
+    /// with; the value is how many. A length that is also invalid is
+    /// reported first, as `invalidLength`.
+    case excessPadding(Int)
   }
 
   /// Why hex does not decode.
@@ -294,6 +328,13 @@ extension XChatError {
 
   /// Why a Thrift binary-protocol encoding is malformed. Sizes, counts and
   /// limits are `Int`s, whatever width the wire declares them in.
+  ///
+  /// `field` is the field's name in the Thrift schema, such as
+  /// `"message_id"`, for the developer reading the error. It is a `String`
+  /// rather than an enum, unlike the other values errors carry: the
+  /// schema's structs have dozens of fields, which change with the
+  /// protocol, and a field of malformed data is nothing a caller can act
+  /// on by case. A caller matches the case, not the field.
   public enum ThriftFailure: Sendable, Hashable {
     /// The input ends inside a value.
     case unexpectedEnd
@@ -340,11 +381,12 @@ extension XChatError {
     /// `decryptFileWithKey` and `FileDecryptor(key:)`, which take none,
     /// leave it nil.
     case file(FileFailure, mediaHashKey: String?)
-    /// A message is encrypted under a conversation-key version no key was
-    /// given for. `available` lists the versions there were keys for, in
-    /// numeric order (`["9", "10"]`): sorted by length, then character by
-    /// character, so a version that is not in canonical decimal form sorts
-    /// by its length too.
+    /// A message is encrypted under a conversation-key version there is no
+    /// key for. `available` lists the versions there were keys for: those
+    /// given and, in `decryptEvents`, those adopted from the batch's key
+    /// changes. They are in numeric order (`["9", "10"]`): sorted by
+    /// length, then character by character, so a version that is not in
+    /// canonical decimal form sorts by its length too.
     case missingConversationKey(MessageRole, version: String, available: [String])
     /// The keys of a message with per-message keys derive from its event's
     /// sender id and message id, and the event lacks one it needs.
@@ -457,6 +499,12 @@ extension XChatError {
   }
 
   /// Why an event's signature was rejected.
+  ///
+  /// The signature's version is checked first, then the signing key at the
+  /// event's key version, then the signature against it. A key that is not
+  /// a P-256 public key is `invalidSigningPublicKey` whatever the signature
+  /// is: the key is the caller's, and no event signed at its version can
+  /// verify until it is replaced.
   public enum SignatureFailure: Sendable, Hashable {
     /// The signature's version is missing or not an integer.
     case missingSignatureVersion

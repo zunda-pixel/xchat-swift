@@ -618,13 +618,11 @@ final class SendTests: XCTestCase {
     func send(
       key: [UInt8] = Self.conversationKey,
       version: String = Self.conversationKeyVersion,
-      entities: [EntityDescriptor]? = nil,
-      attachments: [AttachmentDescriptor]? = nil
+      entities: [EntityDescriptor]? = nil
     ) throws {
       _ = try core.encryptMessage(
         text: "x", conversationId: Self.conversationId, conversationKey: key,
-        conversationKeyVersion: version, senderId: Self.senderId,
-        entities: entities, attachments: attachments)
+        conversationKeyVersion: version, senderId: Self.senderId, entities: entities)
     }
 
     XCTAssertThrowsError(try send(key: [UInt8](repeating: 0, count: 31))) { error in
@@ -637,25 +635,6 @@ final class SendTests: XCTestCase {
       try send(entities: [EntityDescriptor(start: 0, end: 5, type: .hashtag)])
     ) { error in
       XCTAssertEqual(error as? XChatError, .invalidInput(.entityRange(start: 0, end: 5)))
-    }
-    XCTAssertThrowsError(
-      try send(attachments: [
-        .media(
-          mediaHashKey: "h", width: 1, height: 1, filesizeBytes: 0,
-          filename: "f", mediaType: nil, durationMilliseconds: nil,
-          plaintextSHA256: nil)
-      ])
-    ) { error in
-      XCTAssertEqual(
-        error as? XChatError, .invalidInput(.attachment(index: 0, .nonPositiveFilesize)))
-    }
-    XCTAssertThrowsError(
-      try send(attachments: [
-        .post(restId: nil, postURL: nil)
-      ])
-    ) { error in
-      XCTAssertEqual(
-        error as? XChatError, .invalidInput(.attachment(index: 0, .postWithoutReference)))
     }
 
     // Sending needs a signing key and its version.
@@ -685,6 +664,219 @@ final class SendTests: XCTestCase {
         senderId: Self.senderId)
     ) { error in
       XCTAssertEqual(error as? XChatError, .invalidState(.signingKeyVersionNotSet))
+    }
+  }
+
+  /// Each invalid field of an attachment descriptor is its own case, with
+  /// the index of the descriptor it is in, and for a URL card's image,
+  /// which image it is. Descriptors are checked in order, and each one's
+  /// fields in the order they are declared, so the first invalid field is
+  /// reported.
+  func testEachInvalidAttachmentFieldNamesItsCaseAndIndex() throws {
+    let (core, _) = try makeCore()
+    func media(
+      mediaHashKey: String = "h", width: Int64 = 1, height: Int64 = 1,
+      filesizeBytes: Int64 = 1, filename: String = "f", mediaType: Int32? = 1,
+      plaintextSHA256: String? = nil
+    ) -> AttachmentDescriptor {
+      .media(
+        mediaHashKey: mediaHashKey, width: width, height: height,
+        filesizeBytes: filesizeBytes, filename: filename, mediaType: mediaType,
+        durationMilliseconds: nil, plaintextSHA256: plaintextSHA256)
+    }
+    func image(
+      mediaHashKey: String = "i", filesizeBytes: Int64 = 1, filename: String = "i.png",
+      width: Int64? = 1, height: Int64? = 1
+    ) -> UrlAttachmentImageDescriptor {
+      UrlAttachmentImageDescriptor(
+        mediaHashKey: mediaHashKey, filesizeBytes: filesizeBytes, filename: filename,
+        width: width, height: height)
+    }
+    func card(
+      url: String = "https://example.com", banner: UrlAttachmentImageDescriptor? = image(),
+      favicon: UrlAttachmentImageDescriptor? = image()
+    ) -> AttachmentDescriptor {
+      .url(url: url, displayTitle: nil, bannerImage: banner, faviconImage: favicon)
+    }
+    let notSHA256 = Base64.encodeStandard([UInt8](repeating: 0, count: 31))
+    let imageFaults: [(XChatError.CardImageFailure, UrlAttachmentImageDescriptor)] = [
+      (.emptyMediaHashKey, image(mediaHashKey: "")),
+      (.nonPositiveFilesize, image(filesizeBytes: 0)),
+      (.emptyFilename, image(filename: "")),
+      (.negativeWidth, image(width: -1)),
+      (.negativeHeight, image(height: -1)),
+    ]
+    var faults: [(XChatError.AttachmentFailure, AttachmentDescriptor)] = [
+      (.emptyMediaHashKey, media(mediaHashKey: "")),
+      (.negativeWidth, media(width: -1)),
+      (.negativeHeight, media(height: -1)),
+      (.nonPositiveFilesize, media(filesizeBytes: 0)),
+      (.emptyFilename, media(filename: "")),
+      (.unknownMediaType(7), media(mediaType: 7)),
+      (.plaintextSHA256, media(plaintextSHA256: "not base64!")),
+      (.plaintextSHA256, media(plaintextSHA256: notSHA256)),
+      (.emptyURL, card(url: "")),
+      (.postWithoutReference, .post(restId: nil, postURL: nil)),
+      (.postWithoutReference, .post(restId: "", postURL: "")),
+      // The first invalid field is reported.
+      (.negativeWidth, media(width: -1, height: -1)),
+      (.emptyMediaHashKey, media(mediaHashKey: "", filesizeBytes: 0)),
+      (.cardImage(.banner, .emptyFilename), card(banner: image(filename: ""), favicon: nil)),
+      (
+        .cardImage(.banner, .nonPositiveFilesize),
+        card(banner: image(filesizeBytes: 0), favicon: image(mediaHashKey: ""))
+      ),
+      (.cardImage(.favicon, .negativeHeight), card(banner: nil, favicon: image(height: -1))),
+      (.emptyURL, card(url: "", banner: image(mediaHashKey: ""))),
+    ]
+    for (failure, broken) in imageFaults {
+      faults.append((.cardImage(.banner, failure), card(banner: broken)))
+      faults.append((.cardImage(.favicon, failure), card(favicon: broken)))
+    }
+    // Valid descriptors of every kind come before the broken one, so its
+    // index is not always 0.
+    let valid = [media(), card(), .post(restId: "1", postURL: nil)]
+
+    for (failure, broken) in faults {
+      for index in 0...valid.count {
+        let attachments = Array(valid.prefix(index)) + [broken, media(mediaHashKey: "")]
+        XCTAssertThrowsError(
+          try core.encryptMessage(
+            text: "x", conversationId: Self.conversationId,
+            conversationKey: Self.conversationKey,
+            conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId,
+            attachments: attachments),
+          "\(failure) at \(index)"
+        ) { error in
+          XCTAssertEqual(
+            error as? XChatError, .invalidInput(.attachment(index: index, failure)),
+            "\(failure) at \(index)")
+        }
+      }
+    }
+
+    // The valid descriptors are valid, so the faults above are the ones
+    // reported.
+    XCTAssertNoThrow(
+      try core.encryptMessage(
+        text: "x", conversationId: Self.conversationId, conversationKey: Self.conversationKey,
+        conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId,
+        attachments: valid))
+  }
+
+  /// Every send and key change checks that a signing key and its version
+  /// are loaded before anything it is given, so a core that cannot sign
+  /// says so whatever else is wrong: here, a 31-byte conversation key, a
+  /// reply quoting a message no key was given for, and a key change to a
+  /// participant whose identity key is not a key.
+  func testSendsAndKeyChangesCheckTheSigningStateFirst() throws {
+    let (sender, _) = try makeCore()
+    let unopenable = try sender.encryptMessage(
+      text: "quoted", conversationId: Self.conversationId,
+      conversationKey: Self.conversationKey, conversationKeyVersion: "999",
+      senderId: Self.senderId)
+    // A sent event has no sequence id until the server assigns one.
+    let unopenableB64 = try rewritingEvent(unopenable.eventB64) { $0.sequenceId = "7" }
+    let shortKey = [UInt8](repeating: 1, count: 31)
+
+    func calls(_ core: XChatCore) -> [(name: String, call: () throws -> Void)] {
+      [
+        (
+          "message",
+          {
+            _ = try core.encryptMessage(
+              text: "x", conversationId: Self.conversationId, conversationKey: shortKey,
+              conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+          }
+        ),
+        (
+          "reply",
+          {
+            _ = try core.encryptReply(
+              text: "x", replyToEventB64: unopenableB64, conversationId: Self.conversationId,
+              conversationKey: Self.conversationKey,
+              conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+          }
+        ),
+        (
+          "reaction",
+          {
+            _ = try core.encryptReaction(
+              emoji: "👍", targetMessageSequenceId: "5", conversationId: Self.conversationId,
+              conversationKey: shortKey, conversationKeyVersion: Self.conversationKeyVersion,
+              senderId: Self.senderId)
+          }
+        ),
+        (
+          "reaction removal",
+          {
+            _ = try core.encryptRemoveReaction(
+              emoji: "👍", targetMessageSequenceId: "5", conversationId: Self.conversationId,
+              conversationKey: shortKey, conversationKeyVersion: Self.conversationKeyVersion,
+              senderId: Self.senderId)
+          }
+        ),
+        (
+          "edit",
+          {
+            _ = try core.encryptEdit(
+              targetMessageSequenceId: "5", updatedText: "x", targetMessageId: nil,
+              conversationId: Self.conversationId, conversationKey: shortKey,
+              conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+          }
+        ),
+        (
+          "key change",
+          {
+            _ = try core.prepareConversationKeyChange(
+              participants: [
+                ConversationParticipantPublicKey(
+                  userId: Self.senderId,
+                  identityPublicKey: TestVectors.string("identity_public_b64"),
+                  publicKeyVersion: "1"),
+                ConversationParticipantPublicKey(
+                  userId: "2222", identityPublicKey: "not base64!", publicKeyVersion: "1"),
+              ],
+              senderId: Self.senderId, conversationKeyVersion: "5000")
+          }
+        ),
+      ]
+    }
+
+    let noSigningKey = XChatCore()
+    try noSigningKey.importKeys(identityPrivateKey: generateKeyPair().privateKey)
+    let noVersion = XChatCore()
+    try noVersion.importKeys(
+      identityPrivateKey: generateKeyPair().privateKey,
+      signingPrivateKey: generateKeyPair().privateKey)
+    let states: [(core: XChatCore, failure: XChatError.StateFailure)] = [
+      (noSigningKey, .signingKeyNotLoaded),
+      (noVersion, .signingKeyVersionNotSet),
+    ]
+    for (core, failure) in states {
+      for (name, call) in calls(core) {
+        XCTAssertThrowsError(try call(), "\(name): \(failure)") { error in
+          XCTAssertEqual(error as? XChatError, .invalidState(failure), "\(name): \(failure)")
+        }
+      }
+    }
+
+    // With the signing key and its version loaded, each call reports the
+    // other fault.
+    let others: [XChatError] = [
+      .invalidInput(.conversationKeyLength(31)),
+      .decryption(
+        .missingConversationKey(
+          .quotedMessage, version: "999", available: [Self.conversationKeyVersion])),
+      .invalidInput(.conversationKeyLength(31)),
+      .invalidInput(.conversationKeyLength(31)),
+      .invalidInput(.conversationKeyLength(31)),
+      .invalidInput(.participantIdentityKey(userId: "2222")),
+    ]
+    for ((name, call), other) in zip(calls(sender), others) {
+      XCTAssertThrowsError(try call(), name) { error in
+        XCTAssertEqual(error as? XChatError, other, name)
+      }
     }
   }
 
