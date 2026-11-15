@@ -45,7 +45,7 @@ extension XChatCore {
     /// with `decodeNil()` because `SingleValueDecodingContainer` documents
     /// `valueNotFound` for it (JSONDecoder reports `typeMismatch` today).
     /// Any other decoding failure still throws, although JSONDecoder reports
-    /// none for a value that is present.
+    /// nothing but `typeMismatch` here.
     init(from decoder: any Decoder) throws {
       let value = try decoder.singleValueContainer()
       if value.decodeNil() {
