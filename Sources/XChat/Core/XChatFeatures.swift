@@ -4,11 +4,14 @@ extension XChatCore {
   /// Applies a `GET /2/chat/features` answer, given the status and body as
   /// received.
   ///
-  /// An accepted answer (200, body at most 64 KiB, JSON with a `features`
-  /// object) replaces the switches and picks the send format: v1 while
-  /// `v1_send` is on, else v0. Anything else changes nothing, so a failed
-  /// read leaves the previous answer in force. Returns whether the answer
-  /// was accepted.
+  /// An accepted answer (200, and a body of at most 64 KiB that
+  /// `JSONDecoder` decodes as an object with a `features` object) replaces
+  /// the switches and picks the send format: v1 while `v1_send` is on, else
+  /// v0. Only a member of `features` whose value is the JSON `true` turns its
+  /// switch on; any other value (`false`, null, a number, a string, an array,
+  /// an object) reads off, and its type does not reject the answer. Any other
+  /// answer changes nothing, so a failed read leaves the previous answer in
+  /// force. Returns whether the answer was accepted.
   @discardableResult
   public func applyFeatures(statusCode: Int, body: [UInt8]) -> Bool {
     guard statusCode == 200, body.count <= FeatureFetch.maxBodyBytes,
@@ -19,9 +22,15 @@ extension XChatCore {
     return true
   }
 
-  /// The switch names a response body turns on, or nil when the body is not
-  /// a JSON object with a `features` object. Members whose value is not a
-  /// boolean read off; other top-level members are ignored.
+  /// The switch names a response body turns on, or nil when `JSONDecoder`
+  /// cannot decode the body as an object with a `features` object, or when a
+  /// member fails to decode for a reason other than its type. As long as
+  /// `JSONDecoder` decodes the body, members whose value is not a boolean
+  /// read off and other top-level members' values are ignored. `JSONDecoder`
+  /// accepts some values that strict JSON does not: for example (seen on
+  /// macOS 27.2), a number such as `01` or a string with an escape such as
+  /// `\q`, as a `features` member's value (which reads off) or as another
+  /// top-level member's value (which is ignored).
   static func parseFeatures(_ body: [UInt8]) -> Set<String>? {
     guard let response = try? JSONDecoder().decode(FeatureResponse.self, from: Data(body))
     else { return nil }
@@ -38,9 +47,29 @@ extension XChatCore {
   private struct FeatureFlag: Decodable {
     var isEnabled: Bool
 
+    /// Only a JSON boolean can turn a switch on. Any other value (null, a
+    /// number, a string, an array, an object) reads off rather than failing:
+    /// throwing would reject the whole answer, so one member the server
+    /// changes would keep every other switch from applying. Null is checked
+    /// with `decodeNil()` first: `SingleValueDecodingContainer` documents
+    /// `valueNotFound` for it, and the JSON decoder added in
+    /// swiftlang/swift-foundation#2263 (not in 6.4.x) throws that (Foundation
+    /// in Swift 6.4 and on macOS 27.2 reports `typeMismatch`). A failure
+    /// other than a type mismatch still throws (although `JSONDecoder`
+    /// reports none here): the protocol documents only those two for a
+    /// value, so any other failure means broken data or a broken decoder, and
+    /// the answer is rejected like a broken body.
     init(from decoder: any Decoder) throws {
       let value = try decoder.singleValueContainer()
-      isEnabled = (try? value.decode(Bool.self)) == true
+      if value.decodeNil() {
+        isEnabled = false
+        return
+      }
+      do {
+        isEnabled = try value.decode(Bool.self)
+      } catch DecodingError.typeMismatch {
+        isEnabled = false
+      }
     }
   }
 }
