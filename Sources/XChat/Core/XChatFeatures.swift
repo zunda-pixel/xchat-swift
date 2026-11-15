@@ -6,10 +6,10 @@ extension XChatCore {
   ///
   /// An accepted answer (200, and a body of at most 64 KiB that
   /// `JSONDecoder` decodes as an object with a `features` object) replaces
-  /// the switches and picks the send format: v1 while `v1_send` is on, else v0. Only a
-  /// member of `features` whose value is the JSON `true` turns its switch
-  /// on; any other value (`false`, null, a number, a string, an array, an
-  /// object) reads off, and its type does not reject the answer. Any other
+  /// the switches and picks the send format: v1 while `v1_send` is on, else
+  /// v0. Only a member of `features` whose value is the JSON `true` turns its
+  /// switch on; any other value (`false`, null, a number, a string, an array,
+  /// an object) reads off, and its type does not reject the answer. Any other
   /// answer changes nothing, so a failed read leaves the previous answer in
   /// force. Returns whether the answer was accepted.
   @discardableResult
