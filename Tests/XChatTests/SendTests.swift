@@ -551,6 +551,23 @@ final class SendTests: XCTestCase {
     ) { error in
       XCTAssertEqual(error as? XChatError, .invalidState(.signingKeyNotLoaded))
     }
+
+    // The version is state too: no sending call takes it, and the other
+    // bindings report it as invalid_state.
+    let noVersion = XChatCore()
+    try noVersion.importKeys(
+      identityPrivateKey: generateKeyPair().privateKey,
+      signingPrivateKey: generateKeyPair().privateKey)
+    XCTAssertThrowsError(
+      try noVersion.encryptMessage(
+        text: "x", conversationId: Self.conversationId,
+        conversationKey: Self.conversationKey,
+        conversationKeyVersion: Self.conversationKeyVersion,
+        senderId: Self.senderId)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidState(.signingKeyVersionNotSet))
+      XCTAssertEqual((error as? XChatError)?.kind, .invalidState)
+    }
   }
 }
 

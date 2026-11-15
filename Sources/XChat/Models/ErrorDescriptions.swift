@@ -45,8 +45,6 @@ extension XChatError.InputFailure {
       "Invalid key (expected 32 bytes, got \(length))"
     case .privateKey:
       "Invalid private key: not a P-256 scalar"
-    case .signingKeyVersionNotSet:
-      "signing key version is not set: import keys with its public key version"
     case .publicKeyVersion(let version):
       "Invalid public key version '\(version)': pass the key version as the X API "
         + "returns it, an integer in digits"
@@ -156,6 +154,9 @@ extension XChatError.StateFailure {
     switch self {
     case .keysNotLoaded: "keys are not loaded: import keys first"
     case .signingKeyNotLoaded: "signing key is not loaded"
+    case .signingKeyVersionNotSet:
+      "signing key version is not set: import keys with their public key version, or set "
+        + "it with setPublicKeyVersion"
     }
   }
 }

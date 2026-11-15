@@ -65,9 +65,6 @@ extension XChatError {
     case fileKeyLength(Int)
     /// A private key is not a 32-byte P-256 scalar in `[1, n-1]`.
     case privateKey
-    /// The loaded keys have no public key version to sign under: import
-    /// them with their version, or set it.
-    case signingKeyVersionNotSet
 
     // Ids and versions, with the value that was passed
 
@@ -203,6 +200,9 @@ extension XChatError {
     case keysNotLoaded
     /// No signing key is loaded.
     case signingKeyNotLoaded
+    /// The loaded keys have no public key version to sign under: import
+    /// them with their version, or set it with `setPublicKeyVersion`.
+    case signingKeyVersionNotSet
   }
 }
 

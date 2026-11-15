@@ -254,7 +254,7 @@ extension XChatCore {
       throw XChatError.invalidState(.signingKeyNotLoaded)
     }
     guard let signingKeyVersion = keyVersion else {
-      throw XChatError.invalidInput(.signingKeyVersionNotSet)
+      throw XChatError.invalidState(.signingKeyVersionNotSet)
     }
     let messageId = generateMessageId()
     let signatureVersion = keyChangeSignatureVersion(
@@ -333,7 +333,7 @@ extension XChatCore {
       throw XChatError.invalidState(.signingKeyNotLoaded)
     }
     guard let signingKeyVersion = keyVersion else {
-      throw XChatError.invalidInput(.signingKeyVersionNotSet)
+      throw XChatError.invalidState(.signingKeyVersionNotSet)
     }
 
     let encrypted: [UInt8]
