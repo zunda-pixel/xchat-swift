@@ -206,7 +206,11 @@ extension XChatError {
   /// Which message an error is about: the message whose event was passed,
   /// or the message a reply quotes.
   public enum MessageRole: Sendable, Hashable {
+    /// The message whose event was passed to the call.
     case message
+    /// The message a reply quotes: the event passed to `encryptReply` as
+    /// the one it replies to, or the message a received reply embeds in its
+    /// preview.
     case quotedMessage
   }
 
@@ -431,7 +435,11 @@ extension XChatError {
 
   /// The kind of event whose signature an error is about.
   public enum SignedEvent: Sendable, Hashable {
+    /// A message event: a text message, reaction, edit, or another entry a
+    /// conversation's messages carry.
     case message
+    /// A conversation-key change, which hands each participant the new
+    /// conversation key.
     case keyChange
   }
 

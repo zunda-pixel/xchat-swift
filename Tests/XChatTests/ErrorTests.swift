@@ -155,6 +155,19 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
   }
 }
 
+/// A byte that is not in the alphabet is described as hex, after its
+/// character only when that is printable ASCII: a byte from 0x80 up is
+/// part of a multi-byte character, and a control character would be
+/// written into the text.
+@Test func invalidBytesAreDescribedAsHex() {
+  #expect(
+    XChatError.parse(.base64(.invalidCharacter(UInt8(ascii: "!")))).description
+      == "Invalid base64 byte: '!' (0x21)")
+  #expect(
+    XChatError.parse(.base64(.invalidCharacter(0xC3))).description == "Invalid base64 byte: 0xC3")
+  #expect(XChatError.parse(.hex(.invalidCharacter(0x0A))).description == "Invalid hex byte: 0x0A")
+}
+
 /// Hex of an odd length reports that length.
 @Test func hexOfAnOddLengthReportsIt() {
   #expect(throws: XChatError.parse(.hex(.oddLength(3)))) {

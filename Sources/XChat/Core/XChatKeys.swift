@@ -67,8 +67,7 @@ extension XChatCore {
   }
 
   func validatePublicKeyVersion(_ version: String) throws {
-    let canonical = Int64(version).map(String.init)
-    guard canonical == version, let number = Int64(version), number >= 0 else {
+    guard isKeyVersion(version) else {
       throw XChatError.invalidInput(.publicKeyVersion(version))
     }
   }

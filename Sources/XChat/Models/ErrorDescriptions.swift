@@ -234,7 +234,7 @@ extension XChatError.Base64Failure {
   var explanation: String {
     switch self {
     case .dataAfterPadding: "Invalid base64: '=' is followed by data"
-    case .invalidCharacter(let byte): "Invalid base64 character: \(Unicode.Scalar(byte))"
+    case .invalidCharacter(let byte): "Invalid base64 byte: \(describeByte(byte))"
     case .invalidLength(let length): "Invalid base64 length: \(length)"
     }
   }
@@ -244,9 +244,20 @@ extension XChatError.HexFailure {
   var explanation: String {
     switch self {
     case .oddLength(let length): "Invalid hex length: \(length)"
-    case .invalidCharacter(let byte): "Invalid hex character: \(Unicode.Scalar(byte))"
+    case .invalidCharacter(let byte): "Invalid hex byte: \(describeByte(byte))"
     }
   }
+}
+
+/// A byte of a string's UTF-8 as hex, after its character when that is
+/// printable ASCII: `'!' (0x21)`, `0x0A`, `0xC3`. Not the character alone:
+/// a byte from 0x80 up is part of a multi-byte character, so read as a
+/// scalar it is another character, and a control character would be
+/// written into the text as is.
+private func describeByte(_ byte: UInt8) -> String {
+  let hex = "0x" + (byte < 0x10 ? "0" : "") + String(byte, radix: 16, uppercase: true)
+  guard (0x20...0x7E).contains(byte) else { return hex }
+  return "'\(Character(Unicode.Scalar(byte)))' (\(hex))"
 }
 
 extension XChatError.ThriftFailure {
