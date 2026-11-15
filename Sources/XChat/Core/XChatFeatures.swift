@@ -7,11 +7,11 @@ extension XChatCore {
   /// An accepted answer (200, body at most 64 KiB, which `JSONDecoder`
   /// decodes as an object with a `features` object) replaces the switches
   /// and picks the send format: v1 while `v1_send` is on, else v0. Only a
-  /// member whose value is the JSON `true` turns its switch on; any other
-  /// value (`false`, null, a number, a string, an array, an object) reads off
-  /// and does not reject the answer. Any other answer changes nothing, so a
-  /// failed read leaves the previous answer in force. Returns whether the
-  /// answer was accepted.
+  /// member of `features` whose value is the JSON `true` turns its switch
+  /// on; any other value (`false`, null, a number, a string, an array, an
+  /// object) reads off, and its type does not reject the answer. Any other
+  /// answer changes nothing, so a failed read leaves the previous answer in
+  /// force. Returns whether the answer was accepted.
   @discardableResult
   public func applyFeatures(statusCode: Int, body: [UInt8]) -> Bool {
     guard statusCode == 200, body.count <= FeatureFetch.maxBodyBytes,
@@ -26,10 +26,11 @@ extension XChatCore {
   /// cannot decode the body as an object with a `features` object, or when a
   /// member fails to decode for a reason other than its type. Members whose
   /// value is not a boolean read off; other top-level members' values are
-  /// ignored. `JSONDecoder` accepts some input that strict JSON does not:
+  /// ignored. `JSONDecoder` accepts some values that strict JSON does not:
   /// for example (seen on macOS 27.2), a number such as `01` or a string with
-  /// an escape such as `\q`, which reads off as a member's value and is
-  /// ignored elsewhere, and two members with the same name, of which the
+  /// an escape such as `\q`, as a `features` member's value (which reads off)
+  /// or as another top-level member's value (which is ignored). When two
+  /// members have the same name, which JSON allows but leaves undefined, the
   /// first counts.
   static func parseFeatures(_ body: [UInt8]) -> Set<String>? {
     guard let response = try? JSONDecoder().decode(FeatureResponse.self, from: Data(body))
