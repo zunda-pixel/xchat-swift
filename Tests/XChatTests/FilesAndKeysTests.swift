@@ -134,6 +134,42 @@ final class FilesAndKeysTests: XCTestCase {
     }
   }
 
+  /// An empty media hash key names no file, on the receiving and the
+  /// sending side, and is refused before the message is opened.
+  func testEmptyMediaHashKeyIsRefused() throws {
+    let core = XChatCore()
+    let event = TestVectors.string("event_message_key_b64")
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: event, conversationKeys: try Self.messageKeyMap(), mediaHashKey: "")
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.emptyMediaHashKey))
+    }
+    XCTAssertThrowsError(
+      try core.fileDecryptor(
+        eventB64: event, conversationKeys: try Self.messageKeyMap(), mediaHashKey: "")
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.emptyMediaHashKey))
+    }
+    let (version, key) = try XCTUnwrap(try Self.messageKeyMap().first)
+    XCTAssertThrowsError(
+      try core.encryptFile(
+        [1], eventB64: event, conversationKey: key, conversationKeyVersion: version,
+        mediaHashKey: "")
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.emptyMediaHashKey))
+    }
+    // FileEncryptor is noncopyable, which XCTAssertThrowsError cannot
+    // return.
+    do {
+      _ = try core.fileEncryptor(
+        eventB64: event, conversationKey: key, conversationKeyVersion: version, mediaHashKey: "")
+      XCTFail("expected an error")
+    } catch {
+      XCTAssertEqual(error as? XChatError, .invalidInput(.emptyMediaHashKey))
+    }
+  }
+
   /// The versions keys were given for are listed in numeric order.
   func testMissingConversationKeyNamesTheVersion() throws {
     let core = XChatCore()

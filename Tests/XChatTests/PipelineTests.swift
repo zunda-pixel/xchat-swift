@@ -120,6 +120,23 @@ final class PipelineTests: XCTestCase {
     }
   }
 
+  /// Contents shorter than a nonce and tag are reported as too short to be
+  /// encrypted contents, named with the message and its key's version.
+  func testContentsTooShortToBeEncrypted() throws {
+    // Replacing the contents breaks the signature, which only the policy
+    // would reject.
+    let short = try replacingContents(TestVectors.string("event_message_b64"), with: [1, 2, 3])
+    XCTAssertThrowsError(
+      try XChatCore(rejectUnverified: false).decryptEvent(
+        short, conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")])
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(.message, .ciphertextTooShort, key: .conversationKey(version: "1001"))))
+    }
+  }
+
   func testUnverifiedMessageIsRejectedByDefault() throws {
     let wrongKey = SigningKeyEntry(
       userId: TestVectors.string("event_sender_id"),

@@ -330,10 +330,10 @@ final class SendTests: XCTestCase {
     }
   }
 
-  /// A reply's own conversation key and version are reported as invalid
-  /// parameters, not as the quoted message failing to open, whether the
-  /// quoted message is under the conversation key itself (v0) or a key
-  /// derived from it (v1).
+  /// A reply's own conversation key, version and sender id are reported as
+  /// invalid parameters, not as the quoted message failing to open or to
+  /// match the reply's conversation, whether the quoted message is under
+  /// the conversation key itself (v0) or a key derived from it (v1).
   func testReplyChecksItsOwnParametersBeforeTheQuotedMessage() throws {
     let (core, _) = try makeCore(version: .v1)
     let quoted = [
@@ -364,6 +364,27 @@ final class SendTests: XCTestCase {
       XCTAssertEqual(
         error as? XChatError,
         .invalidInput(.conversationKeyVersion("0" + Self.conversationKeyVersion)))
+    }
+
+    // Opened first, the quoted message would not decrypt under this key,
+    // and a one-to-one id given as the other user's alone would join the
+    // malformed sender id into a conversation the quoted message is not
+    // in.
+    let otherUser = "2222"
+    let senders: [(conversationId: String, key: [UInt8], senderId: String)] = [
+      (Self.conversationId, [UInt8](repeating: 1, count: 32), "abc"),
+      (otherUser, Self.conversationKey, "0" + Self.senderId),
+    ]
+    for (conversationId, key, senderId) in senders {
+      XCTAssertThrowsError(
+        try core.encryptReply(
+          text: "a reply", replyToEventB64: TestVectors.string("event_message_b64"),
+          conversationId: conversationId, conversationKey: key,
+          conversationKeyVersion: Self.conversationKeyVersion, senderId: senderId),
+        senderId
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(.senderId(senderId)), senderId)
+      }
     }
   }
 
@@ -513,7 +534,84 @@ final class SendTests: XCTestCase {
     }
   }
 
+  /// A key change's participants are checked before any key is made: an
+  /// empty list, a user id or key version not in canonical decimal form,
+  /// and, without a conversation id, participants that are not two users,
+  /// from whom no one-to-one id derives.
+  func testKeyChangeValidatesItsParticipants() throws {
+    let (core, _) = try makeCore()
+    func participant(
+      _ userId: String, version: String = "1"
+    ) -> ConversationParticipantPublicKey {
+      ConversationParticipantPublicKey(
+        userId: userId, identityPublicKey: TestVectors.string("identity_public_b64"),
+        publicKeyVersion: version)
+    }
+    typealias Case = (
+      name: String, participants: [ConversationParticipantPublicKey],
+      failure: XChatError.InputFailure
+    )
+    let me = participant(Self.senderId)
+    let cases: [Case] = [
+      ("none", [], .noParticipants),
+      ("user id 0", [me, participant("0")], .participantUserId("0")),
+      ("user id 01", [me, participant("01")], .participantUserId("01")),
+      ("key version 01", [me, participant("2222", version: "01")], .participantKeyVersion("01")),
+      ("one user", [me, me], .conversationIdNotDerivable(distinctUsers: 1)),
+      (
+        "three users", [me, participant("2222"), participant("3333")],
+        .conversationIdNotDerivable(distinctUsers: 3)
+      ),
+    ]
+    for (name, participants, failure) in cases {
+      XCTAssertThrowsError(
+        try core.prepareConversationKeyChange(
+          participants: participants, senderId: Self.senderId, conversationKeyVersion: "5000"),
+        name
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(failure), name)
+      }
+    }
+  }
+
   // MARK: Validation
+
+  /// Reactions and edits name the message they target by its sequence id,
+  /// and a reaction needs an emoji: either one empty is refused.
+  func testReactionAndEditTargetsAreChecked() throws {
+    let (core, _) = try makeCore()
+    func add(emoji: String, target: String) throws {
+      _ = try core.encryptReaction(
+        emoji: emoji, targetMessageSequenceId: target, conversationId: Self.conversationId,
+        conversationKey: Self.conversationKey,
+        conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+    }
+    func remove(emoji: String, target: String) throws {
+      _ = try core.encryptRemoveReaction(
+        emoji: emoji, targetMessageSequenceId: target, conversationId: Self.conversationId,
+        conversationKey: Self.conversationKey,
+        conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+    }
+    let reactions: [(name: String, react: (String, String) throws -> Void)] = [
+      ("add", add), ("remove", remove),
+    ]
+    for (name, react) in reactions {
+      XCTAssertThrowsError(try react("👍", ""), name) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(.emptyTargetSequenceId), name)
+      }
+      XCTAssertThrowsError(try react("", "5"), name) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(.emptyReactionEmoji), name)
+      }
+    }
+    XCTAssertThrowsError(
+      try core.encryptEdit(
+        targetMessageSequenceId: "", updatedText: "edited", targetMessageId: "m",
+        conversationId: Self.conversationId, conversationKey: Self.conversationKey,
+        conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.emptyTargetSequenceId))
+    }
+  }
 
   func testSendValidation() throws {
     let (core, _) = try makeCore()
@@ -587,7 +685,6 @@ final class SendTests: XCTestCase {
         senderId: Self.senderId)
     ) { error in
       XCTAssertEqual(error as? XChatError, .invalidState(.signingKeyVersionNotSet))
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidState)
     }
   }
 }
