@@ -169,6 +169,17 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
   #expect(XChatError.parse(.hex(.invalidByte(0x0A))).description == "Invalid hex byte: 0x0A")
 }
 
+/// A Thrift type byte that names no type is described as hex alone, even
+/// when it is a printable character: it is not part of a string.
+@Test func unknownThriftTypesAreDescribedAsHex() {
+  #expect(
+    XChatError.parse(.event(.thrift(.unknownType(0x05)))).description
+      == "Thrift parse error: Thrift input has an unknown type: 0x05")
+  #expect(
+    XChatError.parse(.messageContents(.message, .unknownType(0x41))).description
+      == "Content parse error in the message: Thrift input has an unknown type: 0x41")
+}
+
 /// Hex of an odd length reports that length.
 @Test func hexOfAnOddLengthReportsIt() {
   #expect(throws: XChatError.parse(.hex(.oddLength(3)))) {

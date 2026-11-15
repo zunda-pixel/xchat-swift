@@ -188,8 +188,8 @@ final class PipelineTests: XCTestCase {
 
   // MARK: Errors converted on the way out
 
-  /// Malformed Thrift says what was being read: the event, or the
-  /// contents of a message that did decrypt.
+  /// Malformed Thrift says what was being read: the event, or a message's
+  /// contents, whether they decrypted or were sent unencrypted.
   func testMalformedThriftNamesWhatWasRead() throws {
     XCTAssertThrowsError(
       try XChatCore().decryptEvent(Base64.encodeStandard([0x0b, 0x00]))
@@ -208,6 +208,16 @@ final class PipelineTests: XCTestCase {
     XCTAssertThrowsError(
       try XChatCore(rejectUnverified: false).decryptEvent(
         encodeEvent(event), conversationKeys: ["1001": key])
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .parse(.messageContents(.message, .unexpectedEnd)))
+    }
+
+    // The same struct sent as an unencrypted message's contents.
+    let unencrypted = MessageEvent(
+      sequenceId: "1", messageId: "m", senderId: "1111", conversationId: "1111:2222",
+      detail: .messageCreate(MessageCreateEvent(contents: [0x0c])))
+    XCTAssertThrowsError(
+      try XChatCore(rejectUnverified: false).decryptEvent(encodeEvent(unencrypted))
     ) { error in
       XCTAssertEqual(error as? XChatError, .parse(.messageContents(.message, .unexpectedEnd)))
     }

@@ -143,7 +143,9 @@ public struct FileDecryptor {
   private var finished: Bool
 
   /// Creates a decryptor for one file under a 32-byte key the caller
-  /// holds, as `decryptFileWithKey` takes.
+  /// holds, as `decryptFileWithKey` takes. Its errors for the file's bytes
+  /// (`DecryptionFailure.file`) carry no media hash key; to have them name
+  /// the media, create it with `init(key:mediaHashKey:)`.
   public init(key: [UInt8]) throws {
     guard key.count == 32 else {
       throw XChatError.invalidInput(.fileKeyLength(key.count))

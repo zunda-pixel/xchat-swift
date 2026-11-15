@@ -424,7 +424,8 @@ final class FilesAndKeysTests: XCTestCase {
 
   /// Opening a reply's media reads the reply's contents and the quoted
   /// message's, so contents that decrypt but do not parse name which one
-  /// they are; quoting a message in a reply names it the same way.
+  /// they are; quoting a message in a reply names it the same way, whether
+  /// its contents decrypt or it was sent unencrypted.
   func testMalformedContentsNameTheirMessage() throws {
     let core = XChatCore()
     let mediaHashKey = TestVectors.string("media_first_hash_key")
@@ -471,6 +472,14 @@ final class FilesAndKeysTests: XCTestCase {
     XCTAssertThrowsError(
       try self.reply(quoting: malformedQuotedB64, quotedKeys: try Self.messageKeyMap())
     ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .parse(.messageContents(.quotedMessage, .unexpectedEnd)))
+    }
+
+    let malformedUnencryptedB64 = try replacingContents(
+      TestVectors.string("event_unencrypted_b64"), with: truncatedStruct)
+    XCTAssertThrowsError(try self.reply(quoting: malformedUnencryptedB64, quotedKeys: [:])) {
+      error in
       XCTAssertEqual(
         error as? XChatError, .parse(.messageContents(.quotedMessage, .unexpectedEnd)))
     }

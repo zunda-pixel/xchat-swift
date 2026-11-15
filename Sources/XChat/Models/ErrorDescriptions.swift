@@ -252,9 +252,15 @@ extension XChatError.HexFailure {
 /// scalar it is another character, and a control character would be
 /// written into the text as is.
 private func describeByte(_ byte: UInt8) -> String {
-  let hex = "0x" + (byte < 0x10 ? "0" : "") + String(byte, radix: 16, uppercase: true)
-  guard (0x20...0x7E).contains(byte) else { return hex }
-  return "'\(Character(Unicode.Scalar(byte)))' (\(hex))"
+  guard (0x20...0x7E).contains(byte) else { return hex(byte) }
+  return "'\(Character(Unicode.Scalar(byte)))' (\(hex(byte)))"
+}
+
+/// A byte as two hex digits after `0x`: `0x05`, `0x9E`. A Thrift type
+/// byte is written this way alone, without the character
+/// `describeByte` adds: it is not part of a string.
+private func hex(_ byte: UInt8) -> String {
+  "0x" + (byte < 0x10 ? "0" : "") + String(byte, radix: 16, uppercase: true)
 }
 
 extension XChatError.ThriftFailure {
@@ -263,7 +269,7 @@ extension XChatError.ThriftFailure {
     case .unexpectedEnd:
       "Thrift input ended unexpectedly"
     case .unknownType(let wire):
-      "Thrift input has an unknown type: \(wire)"
+      "Thrift input has an unknown type: \(hex(wire))"
     case .negativeSize(let type, let size):
       "Thrift \(type) has a negative size: \(size)"
     case .sizeExceedsMaximum(let type, let size, let maximum):

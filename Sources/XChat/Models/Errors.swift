@@ -60,6 +60,15 @@ public enum XChatError: Error, Sendable, Hashable {
 
 extension XChatError {
   /// What about a parameter is invalid.
+  ///
+  /// An event passed to a call is a parameter, and so is a message it
+  /// embeds. A received reply's quoted message that the reply does not
+  /// embed, that is in another conversation, or that is not an encrypted
+  /// text message with contents is reported here, by a case that names the
+  /// quoted message, as the event `encryptReply` is given to quote is: the
+  /// message is well formed but not one the call can use, whoever wrote
+  /// it. Bytes in either message that do not decode are `parse`, and
+  /// contents that do not decrypt are `decryption`.
   public enum InputFailure: Sendable, Hashable {
     // Keys
 
@@ -247,8 +256,9 @@ extension XChatError {
     case hex(HexFailure)
     /// An event does not decode.
     case event(EventFailure)
-    /// The decrypted contents of the message the role names are
-    /// malformed Thrift. Opening a reply's media reads both the reply and
+    /// The contents of the message the role names are malformed Thrift:
+    /// the plaintext they decrypted to, or, for an unencrypted message, the
+    /// contents as sent. Opening a reply's media reads both the reply and
     /// the message it quotes, so the role tells them apart.
     case messageContents(MessageRole, ThriftFailure)
   }
@@ -323,9 +333,12 @@ extension XChatError {
     /// A message's contents did not decrypt under `key`, the key the SDK
     /// resolved for that message from the arguments.
     case messageContents(MessageRole, ContentsFailure, key: ContentsKey)
-    /// An encrypted file did not decrypt. `mediaHashKey` names the media
-    /// when the file was opened as a message's media; it is nil for a file
-    /// under a key the caller holds.
+    /// An encrypted file did not decrypt. `mediaHashKey` is the one the
+    /// call that opened the file was given, so the call decides whether it
+    /// is set, not where the key came from: `decryptFile`, `fileDecryptor`
+    /// and `FileDecryptor(key:mediaHashKey:)` set it, and
+    /// `decryptFileWithKey` and `FileDecryptor(key:)`, which take none,
+    /// leave it nil.
     case file(FileFailure, mediaHashKey: String?)
     /// A message is encrypted under a conversation-key version no key was
     /// given for. `available` lists the versions there were keys for, in

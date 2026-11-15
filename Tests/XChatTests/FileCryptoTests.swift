@@ -317,6 +317,40 @@ final class FileCryptoTests: XCTestCase {
     }
   }
 
+  /// The same bytes under the same key name the media from the calls given
+  /// its media hash key, and from no other: the conversation key that opens
+  /// the v0 message's media also opens it as a key the caller holds.
+  func testCallDecidesWhetherTheMediaIsNamed() throws {
+    let core = XChatCore()
+    let truncated = Array(Self.vectorCiphertext[0..<(Self.vectorCiphertext.count - 493)])
+    let event = TestVectors.string("event_conversation_key_media_b64")
+    let keys = [TestVectors.string("event_conversation_key_version"): Self.key]
+    func pushAll(_ decryptor: FileDecryptor) throws -> [UInt8] {
+      var decryptor = decryptor
+      return try decryptor.push(truncated) + decryptor.finish()
+    }
+
+    let named = XChatError.decryption(.file(.truncated, mediaHashKey: Self.mediaHashKey))
+    assertThrows(named, "decryptFile") {
+      try core.decryptFile(
+        truncated, eventB64: event, conversationKeys: keys, mediaHashKey: Self.mediaHashKey)
+    }
+    assertThrows(named, "fileDecryptor") {
+      try pushAll(
+        core.fileDecryptor(
+          eventB64: event, conversationKeys: keys, mediaHashKey: Self.mediaHashKey))
+    }
+    assertThrows(named, "FileDecryptor(key:mediaHashKey:)") {
+      try pushAll(FileDecryptor(key: Self.key, mediaHashKey: Self.mediaHashKey))
+    }
+    assertThrows(.truncated, "decryptFileWithKey") {
+      try core.decryptFileWithKey(truncated, key: Self.key)
+    }
+    assertThrows(.truncated, "FileDecryptor(key:)") {
+      try pushAll(FileDecryptor(key: Self.key))
+    }
+  }
+
   // MARK: Input and state validation
 
   /// Keys must be 32 bytes at every entry point, and a key of another
