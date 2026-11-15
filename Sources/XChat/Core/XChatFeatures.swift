@@ -42,10 +42,11 @@ extension XChatCore {
     /// number, a string, an array, an object) reads off rather than failing:
     /// throwing would reject the whole answer, so one member the server
     /// changes would keep every other switch from applying. Null is checked
-    /// with `decodeNil()` because `SingleValueDecodingContainer` documents
-    /// `valueNotFound` for it (JSONDecoder reports `typeMismatch` today).
-    /// Any other decoding failure still throws, although JSONDecoder reports
-    /// nothing but `typeMismatch` here.
+    /// with `decodeNil()` first: `SingleValueDecodingContainer` documents
+    /// `valueNotFound` for it, and swift-foundation's newer JSON decoder
+    /// throws that (the current one reports `typeMismatch`). A failure other
+    /// than a type mismatch still throws, although JSONDecoder reports none
+    /// here.
     init(from decoder: any Decoder) throws {
       let value = try decoder.singleValueContainer()
       if value.decodeNil() {
