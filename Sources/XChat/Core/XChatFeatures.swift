@@ -8,9 +8,12 @@ extension XChatCore {
   /// object) replaces the switches and picks the send format: v1 while
   /// `v1_send` is on, else v0. Only a member whose value is the JSON `true`
   /// turns its switch on; any other value (`false`, null, a number, a string,
-  /// an array, an object) reads off and does not reject the answer. Any other
-  /// answer changes nothing, so a failed read leaves the previous answer in
-  /// force. Returns whether the answer was accepted.
+  /// an array, an object) reads off and does not reject the answer. The body
+  /// is checked only as far as `JSONDecoder` reads it: a malformed number or
+  /// string is not caught, so the answer is still accepted when one is a
+  /// member's value (which reads off) or sits in another top-level member.
+  /// Any other answer changes nothing, so a failed read leaves the previous
+  /// answer in force. Returns whether the answer was accepted.
   @discardableResult
   public func applyFeatures(statusCode: Int, body: [UInt8]) -> Bool {
     guard statusCode == 200, body.count <= FeatureFetch.maxBodyBytes,
