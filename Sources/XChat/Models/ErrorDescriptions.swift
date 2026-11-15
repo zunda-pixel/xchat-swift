@@ -115,14 +115,15 @@ extension XChatError.InputFailure {
     case .participantIdentityKey(let userId):
       "The identity public key of participant \(userId) is not the base64 of a P-256 public "
         + "key in SEC1 or SPKI DER"
+    case .conversationIdContainsComma(let value):
+      "Invalid conversation_id '\(value)': must not contain a comma, which separates the "
+        + "components of the signed payload"
     case .noParticipants:
       "Invalid public_keys: must not be empty"
     case .conversationIdNotDerivable(let distinctUsers):
       "Cannot derive a one-to-one conversation id from "
         + "\(counted(distinctUsers, "distinct user")); pass conversation_id explicitly for "
         + "group conversations"
-    case .signaturePayloadContainsComma:
-      "Signature payload contains comma-separated component"
     case .entityRange(let start, let end):
       "Invalid entity: offsets \(start)..<\(end) are not a range of the text"
     case .attachment(let index, let failure):
@@ -134,7 +135,7 @@ extension XChatError.InputFailure {
     case .notMessageEvent(.message):
       "The event is not a message: pass the event of a message"
     case .notMessageEvent(.quotedMessage):
-      "The quoted event is not a message: pass the event of a message"
+      "The quoted event is not a message event"
     case .messageIsEdit(let role):
       "\(role.subject) is an edit, which carries neither the edited message's text nor its "
         + "media"
@@ -144,8 +145,8 @@ extension XChatError.InputFailure {
       "\(role.subject) is not encrypted, so neither is its media"
     case .noContents(let role):
       "\(role.subject) has no contents"
-    case .noSequenceId(let role):
-      "\(role.subject) carries no sequence_id"
+    case .quotedMessageWithoutSequenceId:
+      "The quoted message carries no sequence_id, which the reply names it by"
     case .quotedMessageNotEmbedded:
       "The reply does not embed the message it quotes, so that message can't be opened "
         + "through the reply: pass the quoted message's own event"
@@ -470,11 +471,12 @@ extension XChatError.SignatureFailure {
     case .signatureVersionUnsupported(let version, let maximum):
       "signature_version \(version) is not supported (maximum: \(maximum))"
     case .mismatch(let keyVersion):
-      "ECDSA mismatch: key_version=\(keyVersion)"
+      "the signature does not match the event under the signing key for key version "
+        + "'\(keyVersion)'"
     case .malformedSignature:
       "the signature is not a 64-byte ECDSA P-256 signature"
-    case .invalidSigningPublicKey:
-      "the signing key is not a P-256 public key"
+    case .invalidSigningPublicKey(let keyVersion):
+      "the signing key for key version '\(keyVersion)' is not a P-256 public key"
     }
   }
 }

@@ -251,26 +251,22 @@ final class EventSignatureTests: XCTestCase {
       eventSignaturePayload(event: unsupported, detail: try detail(of: unsupported)))
   }
 
-  /// A comma in any component makes the payload ambiguous, so it is
-  /// refused when building and unverifiable when checking.
+  /// A comma in any component makes the payload ambiguous, so no payload
+  /// is built, and a received event with one is unverifiable. Sends refuse
+  /// a conversation id with a comma, the only component a caller passes
+  /// that can hold one, before signing (`conversationIdContainsComma`).
   func testCommaInComponentIsRefused() throws {
-    let event = messageEvent(messageId: "m,1", signatureVersion: "7")
-    XCTAssertThrowsError(
-      try signEventSignature(
-        signingPrivateKey: generateKeyPair().privateKey,
-        publicKeyVersion: "1",
-        messageId: "m,1",
-        senderId: "s",
-        conversationId: "c",
-        signatureVersion: 7,
-        detail: try detail(of: event))
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .invalidInput(.signaturePayloadContainsComma))
+    let events = [
+      messageEvent(messageId: "m,1", signatureVersion: "7"),
+      messageEvent(conversationId: "c,1", signatureVersion: "7"),
+    ]
+    for event in events {
+      XCTAssertNil(eventSignaturePayload(event: event, detail: try detail(of: event)))
+      XCTAssertEqual(
+        checkEventSignature(
+          event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
+        .unverifiable)
     }
-    XCTAssertEqual(
-      checkEventSignature(
-        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
-      .unverifiable)
   }
 
   // MARK: Version bounds

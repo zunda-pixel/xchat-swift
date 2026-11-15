@@ -195,37 +195,54 @@ final class SendTests: XCTestCase {
 
   /// A conversation id that contains a comma is refused, not signed: the
   /// signed payload joins its components with commas, so it could be read
-  /// as other components. Such an id is no pair of user ids, so it is
-  /// signed as given, from a message of either version and a key change.
+  /// as other components. Such an id is no pair of user ids, so it would be
+  /// signed as given. It is refused with the other ids and versions, before
+  /// what the call builds: from a message of either version, from a reply
+  /// before the quoted message is found in another conversation, and from
+  /// a key change before a participant's identity key that is not base64.
   func testAConversationIdWithACommaIsRefused() throws {
+    let commaId = "1111,2222"
+    let refused = XChatError.invalidInput(.conversationIdContainsComma(commaId))
     for version in [SendVersion.v0, .v1] {
       let (core, _) = try makeCore(version: version)
       XCTAssertThrowsError(
         try core.encryptMessage(
-          text: "x", conversationId: "1111,2222", conversationKey: Self.conversationKey,
+          text: "x", conversationId: commaId, conversationKey: Self.conversationKey,
           conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
       ) { error in
-        XCTAssertEqual(
-          error as? XChatError, .invalidInput(.signaturePayloadContainsComma), "\(version)")
+        XCTAssertEqual(error as? XChatError, refused, "\(version)")
       }
     }
 
     let (core, _) = try makeCore()
     XCTAssertThrowsError(
-      try core.prepareConversationKeyChange(
+      try core.encryptReply(
+        text: "a reply", replyToEventB64: TestVectors.string("event_message_b64"),
+        conversationId: commaId, conversationKey: Self.conversationKey,
+        conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, refused)
+    }
+
+    func prepareKeyChange(conversationId: String) throws {
+      _ = try core.prepareConversationKeyChange(
         participants: [
           ConversationParticipantPublicKey(
             userId: Self.senderId,
             identityPublicKey: TestVectors.string("identity_public_b64"),
             publicKeyVersion: "1"),
           ConversationParticipantPublicKey(
-            userId: "2222",
-            identityPublicKey: Base64.encodeStandard(generateKeyPair().publicKey),
-            publicKeyVersion: "1"),
+            userId: "2222", identityPublicKey: "not base64!", publicKeyVersion: "1"),
         ],
-        conversationId: "1111,2222", senderId: Self.senderId, conversationKeyVersion: "5000")
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .invalidInput(.signaturePayloadContainsComma))
+        conversationId: conversationId, senderId: Self.senderId, conversationKeyVersion: "5000")
+    }
+    XCTAssertThrowsError(try prepareKeyChange(conversationId: commaId)) { error in
+      XCTAssertEqual(error as? XChatError, refused)
+    }
+    // Without the comma, the participant's key is reported.
+    XCTAssertThrowsError(try prepareKeyChange(conversationId: Self.conversationId)) { error in
+      XCTAssertEqual(
+        error as? XChatError, .invalidInput(.participantIdentityKey(userId: "2222")))
     }
   }
 
@@ -349,7 +366,7 @@ final class SendTests: XCTestCase {
         "no contents", try replacingContents(TestVectors.string("event_message_b64"), with: nil),
         .noContents(.quotedMessage)
       ),
-      ("no sequence id", message.eventB64, .noSequenceId(.quotedMessage)),
+      ("no sequence id", message.eventB64, .quotedMessageWithoutSequenceId),
       ("edit", try sequenced(edit), .messageIsEdit(.quotedMessage)),
       ("reaction", try sequenced(reaction), .notTextMessage(.quotedMessage)),
     ]
@@ -804,7 +821,9 @@ final class SendTests: XCTestCase {
   /// are loaded before anything it is given, so a core that cannot sign
   /// says so whatever else is wrong: here, a 31-byte conversation key, a
   /// reply quoting a message no key was given for, and a key change to a
-  /// participant whose identity key is not a key.
+  /// participant whose identity key is not a key. A core with no keys at
+  /// all says that no keys are loaded, as the calls that read keys do, and
+  /// one whose keys were imported without a signing key says that.
   func testSendsAndKeyChangesCheckTheSigningStateFirst() throws {
     let (sender, _) = try makeCore()
     let unopenable = try sender.encryptMessage(
@@ -886,6 +905,7 @@ final class SendTests: XCTestCase {
       identityPrivateKey: generateKeyPair().privateKey,
       signingPrivateKey: generateKeyPair().privateKey)
     let states: [(core: XChatCore, failure: XChatError.StateFailure)] = [
+      (XChatCore(), .keysNotLoaded),
       (noSigningKey, .signingKeyNotLoaded),
       (noVersion, .signingKeyVersionNotSet),
     ]
@@ -916,12 +936,12 @@ final class SendTests: XCTestCase {
     }
   }
 
-  /// Every send checks its conversation key, version and sender id before
-  /// anything else it is given, so each reports a malformed one alike
-  /// whatever else is wrong: here, an entity out of range, an empty
-  /// reaction target, or an empty emoji, each reported once the key,
-  /// version and sender id are right.
-  func testSendsCheckTheirKeyVersionAndSenderIdFirst() throws {
+  /// Every send checks its conversation key, version, sender id and
+  /// conversation id before anything else it is given, so each reports a
+  /// malformed one alike whatever else is wrong: here, an entity out of
+  /// range, an empty reaction target, or an empty emoji, each reported once
+  /// the key, version, sender id and conversation id are right.
+  func testSendsCheckTheirKeyVersionAndIdsFirst() throws {
     let (core, _) = try makeCore()
     let quoted = try core.encryptMessage(
       text: "quoted", conversationId: Self.conversationId,
@@ -932,74 +952,90 @@ final class SendTests: XCTestCase {
     let entities = [EntityDescriptor(start: 0, end: 99, type: .hashtag)]
     let outOfRange = XChatError.InputFailure.entityRange(start: 0, end: 99)
 
-    typealias Send = (_ key: [UInt8], _ version: String, _ senderId: String) throws -> Void
+    struct Arguments {
+      var key: [UInt8]
+      var version: String
+      var senderId: String
+      var conversationId: String
+    }
+    typealias Send = (Arguments) throws -> Void
     let sends: [(name: String, send: Send, otherFailure: XChatError.InputFailure)] = [
       (
         "message",
-        { key, version, senderId in
+        { arguments in
           _ = try core.encryptMessage(
-            text: "x", conversationId: Self.conversationId, conversationKey: key,
-            conversationKeyVersion: version, senderId: senderId, entities: entities)
-        },
-        outOfRange
-      ),
-      (
-        "reply",
-        { key, version, senderId in
-          _ = try core.encryptReply(
-            text: "x", replyToEventB64: quotedB64, conversationId: Self.conversationId,
-            conversationKey: key, conversationKeyVersion: version, senderId: senderId,
+            text: "x", conversationId: arguments.conversationId, conversationKey: arguments.key,
+            conversationKeyVersion: arguments.version, senderId: arguments.senderId,
             entities: entities)
         },
         outOfRange
       ),
       (
+        "reply",
+        { arguments in
+          _ = try core.encryptReply(
+            text: "x", replyToEventB64: quotedB64, conversationId: arguments.conversationId,
+            conversationKey: arguments.key, conversationKeyVersion: arguments.version,
+            senderId: arguments.senderId, entities: entities)
+        },
+        outOfRange
+      ),
+      (
         "reaction",
-        { key, version, senderId in
+        { arguments in
           _ = try core.encryptReaction(
-            emoji: "👍", targetMessageSequenceId: "", conversationId: Self.conversationId,
-            conversationKey: key, conversationKeyVersion: version, senderId: senderId)
+            emoji: "👍", targetMessageSequenceId: "", conversationId: arguments.conversationId,
+            conversationKey: arguments.key, conversationKeyVersion: arguments.version,
+            senderId: arguments.senderId)
         },
         .emptyTargetSequenceId
       ),
       (
         "reaction removal",
-        { key, version, senderId in
+        { arguments in
           _ = try core.encryptRemoveReaction(
-            emoji: "", targetMessageSequenceId: "5", conversationId: Self.conversationId,
-            conversationKey: key, conversationKeyVersion: version, senderId: senderId)
+            emoji: "", targetMessageSequenceId: "5", conversationId: arguments.conversationId,
+            conversationKey: arguments.key, conversationKeyVersion: arguments.version,
+            senderId: arguments.senderId)
         },
         .emptyReactionEmoji
       ),
       (
         "edit",
-        { key, version, senderId in
+        { arguments in
           _ = try core.encryptEdit(
             targetMessageSequenceId: "5", updatedText: "x", targetMessageId: nil,
-            conversationId: Self.conversationId, conversationKey: key,
-            conversationKeyVersion: version, senderId: senderId, entities: entities)
+            conversationId: arguments.conversationId, conversationKey: arguments.key,
+            conversationKeyVersion: arguments.version, senderId: arguments.senderId,
+            entities: entities)
         },
         outOfRange
       ),
     ]
-    let malformed:
-      [(key: [UInt8], version: String, senderId: String, failure: XChatError.InputFailure)] = [
-        (
-          [UInt8](repeating: 1, count: 31), Self.conversationKeyVersion, Self.senderId,
-          .conversationKeyLength(31)
-        ),
-        (Self.conversationKey, "01", Self.senderId, .conversationKeyVersion("01")),
-        (Self.conversationKey, Self.conversationKeyVersion, "abc", .senderId("abc")),
-      ]
+    let valid = Arguments(
+      key: Self.conversationKey, version: Self.conversationKeyVersion, senderId: Self.senderId,
+      conversationId: Self.conversationId)
+    var shortKey = valid
+    shortKey.key = [UInt8](repeating: 1, count: 31)
+    var paddedVersion = valid
+    paddedVersion.version = "01"
+    var letterSender = valid
+    letterSender.senderId = "abc"
+    var commaId = valid
+    commaId.conversationId = "1111,2222"
+    let malformed: [(arguments: Arguments, failure: XChatError.InputFailure)] = [
+      (shortKey, .conversationKeyLength(31)),
+      (paddedVersion, .conversationKeyVersion("01")),
+      (letterSender, .senderId("abc")),
+      (commaId, .conversationIdContainsComma("1111,2222")),
+    ]
     for (name, send, otherFailure) in sends {
-      for (key, version, senderId, failure) in malformed {
-        XCTAssertThrowsError(try send(key, version, senderId), "\(name): \(failure)") { error in
+      for (arguments, failure) in malformed {
+        XCTAssertThrowsError(try send(arguments), "\(name): \(failure)") { error in
           XCTAssertEqual(error as? XChatError, .invalidInput(failure), "\(name): \(failure)")
         }
       }
-      XCTAssertThrowsError(
-        try send(Self.conversationKey, Self.conversationKeyVersion, Self.senderId), name
-      ) { error in
+      XCTAssertThrowsError(try send(valid), name) { error in
         XCTAssertEqual(error as? XChatError, .invalidInput(otherFailure), name)
       }
     }

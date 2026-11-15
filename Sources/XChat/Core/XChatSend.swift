@@ -21,7 +21,7 @@ extension XChatCore {
     let signer = try requireSigner()
     try requireSendParameters(
       conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
-      senderId: senderId)
+      senderId: senderId, conversationId: conversationId)
     let version = sendVersion
     let messageId = outgoingMessageId(
       version: version, conversationKey: conversationKey,
@@ -65,10 +65,11 @@ extension XChatCore {
     // conversation key when it is under the same version: checked after, a
     // key of the wrong length would fail as that message's contents not
     // decrypting, a malformed version as no key being given for that
-    // message, and a malformed sender id as its conversation not matching.
+    // message, and a malformed sender id or a conversation id with a comma
+    // as its conversation not matching.
     try requireSendParameters(
       conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
-      senderId: senderId)
+      senderId: senderId, conversationId: conversationId)
     let version = sendVersion
     let messageId = outgoingMessageId(
       version: version, conversationKey: conversationKey,
@@ -106,7 +107,7 @@ extension XChatCore {
     let signer = try requireSigner()
     try requireSendParameters(
       conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
-      senderId: senderId)
+      senderId: senderId, conversationId: conversationId)
     return try encryptContent(
       MessageEntryContents.reactionAdd(
         MessageReactionAdd(
@@ -131,7 +132,7 @@ extension XChatCore {
     let signer = try requireSigner()
     try requireSendParameters(
       conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
-      senderId: senderId)
+      senderId: senderId, conversationId: conversationId)
     return try encryptContent(
       MessageEntryContents.reactionRemove(
         MessageReactionRemove(
@@ -160,7 +161,7 @@ extension XChatCore {
     let signer = try requireSigner()
     try requireSendParameters(
       conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
-      senderId: senderId)
+      senderId: senderId, conversationId: conversationId)
     let thriftEntities = try entities.map {
       try buildThriftEntities($0, text: updatedText)
     }
@@ -195,6 +196,9 @@ extension XChatCore {
     }
     guard isKeyVersion(conversationKeyVersion) else {
       throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
+    }
+    if let conversationId {
+      try requireConversationId(conversationId)
     }
     guard !participants.isEmpty else {
       throw XChatError.invalidInput(.noParticipants)
@@ -390,7 +394,10 @@ extension XChatCore {
     outgoing.messageEventSignature = placeholder
 
     guard let payload = eventSignaturePayload(event: outgoing, detail: detail) else {
-      throw XChatError.invalidInput(.signaturePayloadContainsComma)
+      // Only a comma in a component leaves a message's payload unbuilt,
+      // and only the conversation id, which `requireSendParameters`
+      // checked, can hold one.
+      preconditionFailure("the conversation id is the only component that can hold a comma")
     }
     let signature = try sign(privateKey: signer.privateKey, payload: Array(payload.utf8))
 
@@ -441,9 +448,15 @@ extension XChatCore {
   /// them, whatever the arguments, and checked when signing, their absence
   /// would be hidden by any failure before it, such as the message a reply
   /// quotes not opening, or a participant's identity key not being a key.
+  ///
+  /// A core with no keys at all reports `keysNotLoaded`, as every other
+  /// call that needs a key does, and `signingKeyNotLoaded` is left for keys
+  /// imported without a signing key: every import includes the identity
+  /// key, so a core without one has none.
   private func requireSigner() throws -> Signer {
     guard let signingPrivateKey else {
-      throw XChatError.invalidState(.signingKeyNotLoaded)
+      throw XChatError.invalidState(
+        identityPrivateKey == nil ? .keysNotLoaded : .signingKeyNotLoaded)
     }
     guard let keyVersion else {
       throw XChatError.invalidState(.signingKeyVersionNotSet)
@@ -453,14 +466,17 @@ extension XChatCore {
 
   /// Checks the parameters every send encrypts and signs with: a 32-byte
   /// conversation key, a sender id and a conversation-key version in
-  /// canonical decimal form. Every send checks them before anything else it
-  /// is given, so whatever else is wrong, each send reports a malformed key,
-  /// version or sender id alike; a reply has to, because it opens the
-  /// message it quotes with that key.
+  /// canonical decimal form, and a conversation id without a comma. Every
+  /// send checks them before anything else it is given, so whatever else is
+  /// wrong, each send reports a malformed key, version, sender id or
+  /// conversation id alike; a reply has to, because it opens the message it
+  /// quotes with that key and compares that message's conversation with
+  /// the reply's.
   private func requireSendParameters(
     conversationKey: [UInt8],
     conversationKeyVersion: String,
-    senderId: String
+    senderId: String,
+    conversationId: String
   ) throws {
     guard conversationKey.count == 32 else {
       throw XChatError.invalidInput(.conversationKeyLength(conversationKey.count))
@@ -470,6 +486,20 @@ extension XChatCore {
     }
     guard isKeyVersion(conversationKeyVersion) else {
       throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
+    }
+    try requireConversationId(conversationId)
+  }
+
+  /// Checks that a conversation id passed to a send or key change can be
+  /// signed: the signed payload joins its components with commas, without
+  /// escaping, and the conversation id is the only component a caller
+  /// passes that is not checked to be digits. Checking it with the other
+  /// ids and versions, rather than when signing, reports it before what
+  /// the call builds: the message a reply quotes, which would not be in
+  /// the reply's conversation, or a key change's participants' keys.
+  private func requireConversationId(_ conversationId: String) throws {
+    guard !conversationId.contains(",") else {
+      throw XChatError.invalidInput(.conversationIdContainsComma(conversationId))
     }
   }
 
@@ -719,7 +749,7 @@ extension XChatCore {
       throw XChatError.invalidInput(.noContents(.quotedMessage))
     }
     guard let sequenceId = raw.sequenceId else {
-      throw XChatError.invalidInput(.noSequenceId(.quotedMessage))
+      throw XChatError.invalidInput(.quotedMessageWithoutSequenceId)
     }
     let plaintext: [UInt8]
     var carriedKey: [UInt8]?

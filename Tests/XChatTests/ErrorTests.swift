@@ -68,6 +68,14 @@ import XChat
     "XChatError.verification(.rejected(.keyChange, .signatureVersionTooOld(2, minimum: 7)))"
   ),
   (
+    .verification(.rejected(.message, .invalidSigningPublicKey(keyVersion: "1"))),
+    #"XChatError.verification(.rejected(.message, .invalidSigningPublicKey(keyVersion: "1")))"#
+  ),
+  (
+    .invalidInput(.conversationIdContainsComma("1,2")),
+    #"XChatError.invalidInput(.conversationIdContainsComma("1,2"))"#
+  ),
+  (
     .internalError(.unexpected(#"say "hi""#)),
     #"XChatError.internalError(.unexpected("say \"hi\""))"#
   ),
@@ -84,8 +92,14 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
 
 /// The sending calls share cases with the receiving ones, so those cases
 /// describe what is wrong without telling the caller to pass a received
-/// event or key changes to decryptEvents.
+/// event or key changes to decryptEvents. A quoted event that is not a
+/// message is described without telling the caller to pass a message's
+/// event: from a received reply, the caller passed the reply, and the
+/// sender embedded the quoted event.
 @Test func sharedCasesDescribeTheFaultForEitherDirection() {
+  #expect(
+    XChatError.invalidInput(.notMessageEvent(.quotedMessage)).description
+      == "The quoted event is not a message event")
   let notFound = XChatError.invalidInput(.mediaHashKeyNotFound("h", available: ["a", "b"]))
   #expect(
     notFound.description
@@ -172,7 +186,8 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
   .invalidInput(.notTextMessage(.quotedMessage)),
   .invalidInput(.notEncrypted(.message)),
   .invalidInput(.noContents(.quotedMessage)),
-  .invalidInput(.noSequenceId(.quotedMessage)),
+  .invalidInput(.quotedMessageWithoutSequenceId),
+  .invalidInput(.conversationIdContainsComma("1,2")),
   .invalidInput(.quotedMessageNotEmbedded),
   .invalidInput(.quotedMessageInOtherConversation),
   .invalidInput(.emptyMediaHashKey),
@@ -202,12 +217,11 @@ func descriptionsStartWithACapitalLetter(error: XChatError) throws {
   #expect(first.isUppercase, "\(error.description)")
 }
 
-/// What a nested failure adds follows the colon of the case that holds it
-/// as a fragment, starting as it would mid-sentence: the case says what
-/// was read, and the fragment does not repeat it. Base64 is described the
-/// same alone and in an event, and a count of one takes the singular.
-@Test(arguments: [
-  (XChatError.parse(.base64(.dataAfterPadding)), "Invalid base64: '=' is followed by data"),
+/// Nested failures and their whole descriptions, for
+/// `nestedFailuresAreFragmentsAfterAColon`. Typed apart from the test, so
+/// the compiler need not infer the type of the literal.
+private let nestedFailureDescriptions: [(XChatError, String)] = [
+  (.parse(.base64(.dataAfterPadding)), "Invalid base64: '=' is followed by data"),
   (.parse(.event(.base64(.dataAfterPadding))), "Invalid base64 event: '=' is followed by data"),
   (
     .parse(.base64(.invalidByte(UInt8(ascii: "!")))),
@@ -255,7 +269,23 @@ func descriptionsStartWithACapitalLetter(error: XChatError) throws {
     "Message signature verification failed: the signature is not a 64-byte ECDSA P-256 "
       + "signature"
   ),
-])
+  (
+    .verification(.rejected(.message, .mismatch(keyVersion: "1"))),
+    "Message signature verification failed: the signature does not match the event under "
+      + "the signing key for key version '1'"
+  ),
+  (
+    .verification(.rejected(.keyChange, .invalidSigningPublicKey(keyVersion: "2"))),
+    "KeyChange signature verification failed: the signing key for key version '2' is not a "
+      + "P-256 public key"
+  ),
+]
+
+/// What a nested failure adds follows the colon of the case that holds it
+/// as a fragment, starting as it would mid-sentence: the case says what
+/// was read, and the fragment does not repeat it. Base64 is described the
+/// same alone and in an event, and a count of one takes the singular.
+@Test(arguments: nestedFailureDescriptions)
 func nestedFailuresAreFragmentsAfterAColon(error: XChatError, expected: String) throws {
   #expect(error.description == expected)
   let colon = try #require(error.description.range(of: ": "))

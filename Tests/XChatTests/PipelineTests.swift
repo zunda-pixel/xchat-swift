@@ -376,7 +376,7 @@ final class PipelineTests: XCTestCase {
 
     let rejections: [(SigningKeyEntry, XChatError.SignatureFailure)] = [
       (otherKey, .mismatch(keyVersion: keyVersion)),
-      (notAKey, .invalidSigningPublicKey),
+      (notAKey, .invalidSigningPublicKey(keyVersion: keyVersion)),
     ]
     for (signingKey, failure) in rejections {
       XCTAssertThrowsError(
@@ -402,7 +402,8 @@ final class PipelineTests: XCTestCase {
     let batch = try makeCore().decryptEvents(
       [TestVectors.string("event_key_change_b64")], signingKeys: [notAKey])
     XCTAssertEqual(
-      batch.errors, [0: .verification(.rejected(.keyChange, .invalidSigningPublicKey))])
+      batch.errors,
+      [0: .verification(.rejected(.keyChange, .invalidSigningPublicKey(keyVersion: keyVersion)))])
   }
 
   /// When both the signing key and the signature are malformed, the key is
@@ -437,7 +438,8 @@ final class PipelineTests: XCTestCase {
           try decrypt(signature: badSignature, signingKey: signingKey), name
         ) { error in
           XCTAssertEqual(
-            error as? XChatError, .verification(.rejected(.message, .invalidSigningPublicKey)),
+            error as? XChatError,
+            .verification(.rejected(.message, .invalidSigningPublicKey(keyVersion: keyVersion))),
             name)
         }
       }
@@ -852,6 +854,50 @@ final class PipelineTests: XCTestCase {
           signingKeys: [key])
       ) { error in
         XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
+      }
+    }
+  }
+
+  /// A signing key that is not a P-256 public key is rejected as such, with
+  /// its key version, only when it is given without an identity-key
+  /// binding. Given with one, it fails the binding, which needs the key's
+  /// SPKI, so it is not used and the event is unverifiable, whether or not
+  /// the key is base64.
+  func testAMalformedSigningKeyWithABindingIsNotUsed() throws {
+    let senderId = TestVectors.string("event_sender_id")
+    let keyVersion = TestVectors.string("event_signing_key_version")
+    let identitySignature = try sign(
+      privateKey: TestVectors.bytes("identity_private_b64"),
+      payload: try spkiDER(publicKey: TestVectors.bytes("signing_public_b64")))
+    func decrypt(signingKey: SigningKeyEntry) throws {
+      _ = try XChatCore().decryptEvent(
+        TestVectors.string("event_message_b64"),
+        conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
+        signingKeys: [signingKey])
+    }
+
+    for badKey in ["not base64!", Base64.encodeStandard([0x04] + [UInt8](repeating: 0, count: 64))]
+    {
+      XCTAssertThrowsError(
+        try decrypt(
+          signingKey: SigningKeyEntry(
+            userId: senderId, publicKeyVersion: keyVersion, publicKey: badKey)),
+        badKey
+      ) { error in
+        XCTAssertEqual(
+          error as? XChatError,
+          .verification(.rejected(.message, .invalidSigningPublicKey(keyVersion: keyVersion))),
+          badKey)
+      }
+      XCTAssertThrowsError(
+        try decrypt(
+          signingKey: SigningKeyEntry(
+            userId: senderId, publicKeyVersion: keyVersion, publicKey: badKey,
+            identityPublicKey: TestVectors.string("identity_public_b64"),
+            signingPublicKeySignature: Base64.encodeStandard(identitySignature))),
+        badKey
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)), badKey)
       }
     }
   }

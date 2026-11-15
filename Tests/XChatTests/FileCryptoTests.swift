@@ -209,6 +209,28 @@ final class FileCryptoTests: XCTestCase {
     }
   }
 
+  /// Data after a final frame shorter than a full one, or after the header
+  /// of an empty file, is read as part of a frame, since frames are read a
+  /// full frame at a time: the frame does not authenticate, as the last
+  /// frame when the data fits in it, and as a frame with more after it
+  /// when the data runs past a full frame.
+  func testDataAfterAShortFinalFrameFailsAsAFrame() throws {
+    let files = [
+      ("1 byte", try encryptFile(key: Self.key, plaintext: [9])),
+      ("empty", try encryptFile(key: Self.key, plaintext: [])),
+    ]
+    XCTAssertEqual(files.map(\.1.count), [24 + 18, 24])
+    for (name, encrypted) in files {
+      assertThrows(.lastFrameAuthenticationFailed, name) {
+        try decryptFile(key: Self.key, ciphertext: encrypted + [UInt8](repeating: 0, count: 10))
+      }
+      assertThrows(.authenticationFailed, name) {
+        try decryptFile(
+          key: Self.key, ciphertext: encrypted + [UInt8](repeating: 0, count: 1100))
+      }
+    }
+  }
+
   /// A tampered frame byte fails authentication and yields no plaintext.
   /// The last frame's failure is its own case, since it may also be cut
   /// short.

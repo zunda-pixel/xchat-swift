@@ -222,12 +222,18 @@ func checkEventSignature(
   } catch {
     // Everything else `verify` and the base64 decoding throw is about the
     // signing key: it is not base64, or not a P-256 public key.
-    return .failed(.invalidSigningPublicKey)
+    return .failed(.invalidSigningPublicKey(keyVersion: keyVersion))
   }
 }
 
 /// Signs an event's payload at `signatureVersion`, returning the signature
 /// struct the event carries and the payload that was signed.
+///
+/// The caller passes every field the layout signs, none with a comma. Of
+/// a key change's components, only the conversation id can hold one, and
+/// `prepareConversationKeyChange` checks it first
+/// (`InputFailure.conversationIdContainsComma`); the others are ids and
+/// versions checked to be digits, a minted message id, and base64.
 func signEventSignature(
   signingPrivateKey: [UInt8],
   publicKeyVersion: String,
@@ -251,7 +257,7 @@ func signEventSignature(
       event: event, detail: detail,
       plaintextConversationKeyB64: plaintextConversationKeyB64)
   else {
-    throw XChatError.invalidInput(.signaturePayloadContainsComma)
+    preconditionFailure("the payload of an event being signed has every field and no comma")
   }
 
   let signature = try sign(privateKey: signingPrivateKey, payload: Array(payload.utf8))

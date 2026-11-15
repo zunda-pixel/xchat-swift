@@ -71,9 +71,9 @@ extension XChatError {
   /// same cases for the reasons the two share: another conversation, not a
   /// message event, no contents, an edit, not a text message.
   /// `encryptReply` quotes an unencrypted message too, and instead needs
-  /// the quoted event's sequence id (`noSequenceId`). Bytes in either
-  /// message that do not decode are `parse`, and contents that do not
-  /// decrypt are `decryption`.
+  /// the quoted event's sequence id (`quotedMessageWithoutSequenceId`).
+  /// Bytes in either message that do not decode are `parse`, and contents
+  /// that do not decrypt are `decryption`.
   public enum InputFailure: Sendable, Hashable {
     // Keys
 
@@ -109,6 +109,14 @@ extension XChatError {
     /// base64 of a P-256 public key in compressed SEC1, uncompressed SEC1,
     /// or canonical SPKI DER.
     case participantIdentityKey(userId: String)
+    /// The conversation id contains a comma. The signature covers the
+    /// conversation id among other components joined with commas, so a
+    /// comma would make the signed payload ambiguous. The other components
+    /// are ids and versions in canonical decimal form, a message id the SDK
+    /// mints, and base64, so the conversation id is the only one that can
+    /// hold a comma. Sends and key changes check it with their other ids
+    /// and versions, before what they build.
+    case conversationIdContainsComma(String)
 
     // Building events
 
@@ -118,9 +126,6 @@ extension XChatError {
     /// participants are not two distinct users, so no one-to-one id derives
     /// from them. The value is the number of distinct users.
     case conversationIdNotDerivable(distinctUsers: Int)
-    /// A component the signature covers contains a comma, which would make
-    /// the comma-joined payload ambiguous.
-    case signaturePayloadContainsComma
     /// An entity's offsets are not a range of the text's UTF-8 bytes.
     case entityRange(start: Int32, end: Int32)
     /// The attachment descriptor at `index` is invalid.
@@ -144,8 +149,10 @@ extension XChatError {
     case notEncrypted(MessageRole)
     /// The message event carries no contents.
     case noContents(MessageRole)
-    /// The message event carries no sequence id.
-    case noSequenceId(MessageRole)
+    /// The event `encryptReply` is given to quote carries no sequence id,
+    /// which the reply names it by. Only `encryptReply` needs one, so this
+    /// case names no `MessageRole`.
+    case quotedMessageWithoutSequenceId
     /// A reply does not embed the message it quotes, so that message cannot
     /// be opened through the reply.
     case quotedMessageNotEmbedded
@@ -262,9 +269,14 @@ extension XChatError {
 extension XChatError {
   /// What the chat's state lacks.
   public enum StateFailure: Sendable, Hashable {
-    /// No keys are loaded: import keys first.
+    /// No keys are loaded: import keys first. Every call that cannot do
+    /// without a loaded key reports this on a core with none: the calls
+    /// that return or export the keys, and sends and key changes, though
+    /// they need only the signing key.
     case keysNotLoaded
-    /// No signing key is loaded.
+    /// Keys are loaded, but without a signing key: they were imported for
+    /// identity-only use, with no `signingPrivateKey`. Sends, key changes
+    /// and `getPublicKeys` need one.
     case signingKeyNotLoaded
     /// The loaded keys have no public key version to sign under: import
     /// them with their version, or set it with `setPublicKeyVersion`.
@@ -435,13 +447,25 @@ extension XChatError {
     /// A frame with more of the file after it did not authenticate: the
     /// bytes are corrupted, or they are another file's (encrypted under
     /// another key). As with `ContentsFailure.authenticationFailed`, the
-    /// two cannot be told apart.
+    /// two cannot be told apart. Data after a final frame shorter than a
+    /// full one can fail this way too (see `dataAfterFinalFrame`).
     case authenticationFailed
     /// The last frame did not authenticate. Bytes cut short inside that
     /// frame fail the same way, so besides being corrupted or another
-    /// file's, the bytes may be truncated.
+    /// file's, the bytes may be truncated. Data after a final frame
+    /// shorter than a full one can fail this way too (see
+    /// `dataAfterFinalFrame`).
     case lastFrameAuthenticationFailed
-    /// Data follows the file's final frame.
+    /// Data follows the file's final frame, and that frame is a full one
+    /// (1041 bytes, from a file whose plaintext fills its last 1024-byte
+    /// chunk).
+    ///
+    /// Frames are read 1041 bytes at a time, and only a frame that
+    /// authenticates says it is the final one, so data after a shorter
+    /// final frame, or after the header of an empty file, is read as part
+    /// of a frame, which then does not authenticate. When the frame read
+    /// is the last, that is `lastFrameAuthenticationFailed`; when more
+    /// bytes follow it, `authenticationFailed`.
     case dataAfterFinalFrame
     /// The bytes end before the file's final frame, or inside its 24-byte
     /// header.
@@ -508,6 +532,14 @@ extension XChatError {
   /// with no signature is `VerificationFailure.unverifiable` before its
   /// version is checked, and one with no signing key at its key version, or
   /// whose signed payload cannot be rebuilt, before its key is.
+  ///
+  /// Only a key given without an identity-key binding (none of
+  /// `SigningKeyEntry`'s `identityPublicKey`, `identityPublicKeySignature`
+  /// and `signingPublicKeySignature` set) reaches this check as it is. A
+  /// key given with a binding is checked when the binding is, before any
+  /// event: one that is not a P-256 public key fails its binding and is
+  /// not used, so an event only it could verify is
+  /// `VerificationFailure.unverifiable`, not `invalidSigningPublicKey`.
   public enum SignatureFailure: Sendable, Hashable {
     /// The signature's version is missing or not an integer.
     case missingSignatureVersion
@@ -520,9 +552,11 @@ extension XChatError {
     case mismatch(keyVersion: String)
     /// The signature is not a raw 64-byte `r || s` ECDSA P-256 signature.
     case malformedSignature
-    /// The signing key at the event's key version is not a P-256 public
-    /// key.
-    case invalidSigningPublicKey
+    /// The signing key at `keyVersion`, the event's key version, is not a
+    /// P-256 public key. It was given without an identity-key binding: one
+    /// given with a binding that is not a P-256 public key is not used, as
+    /// the enum's documentation says.
+    case invalidSigningPublicKey(keyVersion: String)
   }
 }
 
