@@ -718,7 +718,7 @@ extension XChatCore {
       plaintext = contents
     }
     let holder = try readThrift(
-      plaintext, as: XChatError.ParseFailure.messageContents, MessageEntryHolder.read)
+      plaintext, as: { .messageContents(.quotedMessage, $0) }, MessageEntryHolder.read)
     let original: MessageContents
     switch holder.contents {
     case .message(let message):

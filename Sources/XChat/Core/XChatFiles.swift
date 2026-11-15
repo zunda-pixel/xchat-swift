@@ -219,7 +219,7 @@ extension XChatCore {
     }
     let plaintext = try decryptContents(contents, key: contentsKey, of: role, from: source)
     let holder = try readThrift(
-      plaintext, as: XChatError.ParseFailure.messageContents, MessageEntryHolder.read)
+      plaintext, as: { .messageContents(role, $0) }, MessageEntryHolder.read)
     switch holder.contents {
     case .message(let message):
       return OpenedMessage(contents: message, keys: keys)

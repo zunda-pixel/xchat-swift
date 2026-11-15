@@ -367,6 +367,60 @@ final class FilesAndKeysTests: XCTestCase {
     }
   }
 
+  /// Opening a reply's media reads the reply's contents and the quoted
+  /// message's, so contents that decrypt but do not parse name which one
+  /// they are; quoting a message in a reply names it the same way.
+  func testMalformedContentsNameTheirMessage() throws {
+    let core = XChatCore()
+    let mediaHashKey = TestVectors.string("media_first_hash_key")
+    let truncatedStruct: [UInt8] = [0x0c]
+    let reply = try reply(
+      quoting: TestVectors.string("event_message_key_b64"),
+      quotedKeys: try Self.messageKeyMap())
+
+    let replyEvent = try core.parseEvent(reply.eventB64)
+    let replyVersion = try XCTUnwrap(reply.keys.keys.first)
+    let replyKey = try core.messageKey(
+      of: replyEvent, conversationKey: try XCTUnwrap(reply.keys[replyVersion]), role: .message)
+    let malformedReply = try replacingContents(
+      reply.eventB64, with: try encryptMessage(key: replyKey, plaintext: truncatedStruct))
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: malformedReply, conversationKeys: reply.keys, mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .parse(.messageContents(.message, .unexpectedEnd)))
+    }
+
+    let quotedB64 = TestVectors.string("event_message_key_b64")
+    let quotedVersion = TestVectors.string("message_key_conversation_key_version")
+    let quotedKey = try core.messageKey(
+      of: try core.parseEvent(quotedB64),
+      conversationKey: try XCTUnwrap(try Self.messageKeyMap()[quotedVersion]),
+      role: .quotedMessage)
+    let malformedQuotedB64 = try replacingContents(
+      quotedB64, with: try encryptMessage(key: quotedKey, plaintext: truncatedStruct))
+    let malformedQuoted = try core.parseEvent(malformedQuotedB64)
+    // The reply carries the quoted message's key, which opens the
+    // replaced contents too: they are under the same sender and message id.
+    let quotingMalformed = try rewritingReply(reply.eventB64, keys: reply.keys) {
+      $0.replyingToPreview?.rawEventMessageCreate = malformedQuoted
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: quotingMalformed, conversationKeys: reply.keys, mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .parse(.messageContents(.quotedMessage, .unexpectedEnd)))
+    }
+
+    XCTAssertThrowsError(
+      try self.reply(quoting: malformedQuotedB64, quotedKeys: try Self.messageKeyMap())
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .parse(.messageContents(.quotedMessage, .unexpectedEnd)))
+    }
+  }
+
   /// Without the quoted message's conversation key, its media opens only
   /// through what the reply embeds: the quoted event, and a 32-byte key
   /// for it.

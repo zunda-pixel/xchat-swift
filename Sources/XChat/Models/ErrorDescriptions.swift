@@ -167,7 +167,8 @@ extension XChatError.ParseFailure {
     case .hex(let failure): failure.explanation
     case .event(.base64(let failure)): "Invalid base64 event: \(failure.explanation)"
     case .event(.thrift(let failure)): "Thrift parse error: \(failure.explanation)"
-    case .messageContents(let failure): "Content parse error: \(failure.explanation)"
+    case .messageContents(let role, let failure):
+      "Content parse error in \(role.noun): \(failure.explanation)"
     }
   }
 }

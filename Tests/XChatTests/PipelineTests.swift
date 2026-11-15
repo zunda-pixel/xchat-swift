@@ -164,7 +164,7 @@ final class PipelineTests: XCTestCase {
       try XChatCore(rejectUnverified: false).decryptEvent(
         encodeEvent(event), conversationKeys: ["1001": key])
     ) { error in
-      XCTAssertEqual(error as? XChatError, .parse(.messageContents(.unexpectedEnd)))
+      XCTAssertEqual(error as? XChatError, .parse(.messageContents(.message, .unexpectedEnd)))
     }
   }
 

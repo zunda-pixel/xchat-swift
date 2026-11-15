@@ -218,8 +218,10 @@ extension XChatError {
     case hex(HexFailure)
     /// An event does not decode.
     case event(EventFailure)
-    /// A message's decrypted contents are malformed Thrift.
-    case messageContents(ThriftFailure)
+    /// The decrypted contents of the message the role names are
+    /// malformed Thrift. Opening a reply's media reads both the reply and
+    /// the message it quotes, so the role tells them apart.
+    case messageContents(MessageRole, ThriftFailure)
   }
 
   /// Why an event does not decode: events travel as the base64 of their

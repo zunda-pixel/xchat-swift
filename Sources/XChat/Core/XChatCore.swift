@@ -490,7 +490,7 @@ private struct ParsedMessageContent {
 
 private func parseMessageContent(_ bytes: [UInt8]) throws -> ParsedMessageContent {
   let holder = try readThrift(
-    bytes, as: XChatError.ParseFailure.messageContents, MessageEntryHolder.read)
+    bytes, as: { .messageContents(.message, $0) }, MessageEntryHolder.read)
 
   var attachments: [AttachmentInfo] = []
   var mediaHashes: [MediaHashReference] = []
