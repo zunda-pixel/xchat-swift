@@ -155,6 +155,27 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
   }
 }
 
+/// Hex of an odd length reports that length.
+@Test func hexOfAnOddLengthReportsIt() {
+  #expect(throws: XChatError.parse(.hex(.oddLength(3)))) {
+    try Hex.decode("abc")
+  }
+}
+
+/// Base64 whose length, padding included, no encoding has reports that
+/// length, from either decoder and from an event that travels as base64.
+@Test func base64OfAnImpossibleLengthReportsIt() {
+  #expect(throws: XChatError.parse(.base64(.invalidLength(5)))) {
+    try Base64.decodeStandard("AAAAA")
+  }
+  #expect(throws: XChatError.parse(.base64(.invalidLength(5)))) {
+    try Base64.decodeURLSafe("AA===")
+  }
+  #expect(throws: XChatError.parse(.event(.base64(.invalidLength(1))))) {
+    try XChatCore().decryptEvent("A")
+  }
+}
+
 /// Errors are Hashable, so a caller can collect the distinct failures of a
 /// batch.
 @Test func errorsAreHashable() {

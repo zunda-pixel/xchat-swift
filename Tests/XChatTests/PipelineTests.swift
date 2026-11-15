@@ -213,6 +213,133 @@ final class PipelineTests: XCTestCase {
     }
   }
 
+  /// An event and a message's contents report what in them is malformed: a
+  /// string that is not UTF-8, a list or a map of other types than its
+  /// field's, and an attachment of the message or of the message its reply
+  /// preview shows that sets none of its variants.
+  func testMalformedThriftNamesWhatIsWrong() throws {
+    func encoded(_ write: (inout ThriftWriter) -> Void) -> [UInt8] {
+      var writer = ThriftWriter()
+      write(&writer)
+      return writer.data
+    }
+    // A message-delete event, whose fields are written by `write`.
+    func deleteEvent(_ write: (inout ThriftWriter) -> Void) -> String {
+      Base64.encodeStandard(
+        encoded { writer in
+          writer.writeFieldBegin(id: 7, type: .structure)  // detail
+          writer.writeFieldBegin(id: 7, type: .structure)  // messageDeleteEvent
+          write(&writer)
+          writer.writeFieldStop()  // end the delete event
+          writer.writeFieldStop()  // end the detail union
+          writer.writeFieldStop()  // end the event
+        })
+    }
+    let events: [(name: String, eventB64: String, failure: XChatError.ThriftFailure)] = [
+      (
+        "message id",
+        Base64.encodeStandard(
+          encoded {
+            $0.writeFieldBegin(id: 2, type: .binary)
+            $0.writeBinary([0xFF])
+            $0.writeFieldStop()
+          }),
+        .invalidUTF8
+      ),
+      (
+        "sequence ids",
+        deleteEvent {
+          $0.writeFieldBegin(id: 1, type: .list)
+          $0.writeListBegin(elementType: .i32, count: 0)
+        },
+        .listElementType(field: "sequence_ids", actual: .i32, expected: .binary)
+      ),
+      (
+        "pinned sequence ids",
+        deleteEvent {
+          $0.writeFieldBegin(id: 3, type: .map)
+          $0.writeMapBegin(keyType: .binary, valueType: .i64, count: 0)
+        },
+        .mapTypes(field: "pme_sequence_ids", key: .binary, value: .i64)
+      ),
+    ]
+    for (name, eventB64, failure) in events {
+      XCTAssertThrowsError(try XChatCore().decryptEvent(eventB64), name) { error in
+        XCTAssertEqual(error as? XChatError, .parse(.event(.thrift(failure))), name)
+      }
+    }
+
+    // An unencrypted message, whose contents are plaintext Thrift: a text
+    // message whose fields are written by `write`.
+    func message(_ write: (inout ThriftWriter) -> Void) -> String {
+      let contents = encoded { writer in
+        writer.writeFieldBegin(id: 1, type: .structure)  // contents
+        writer.writeFieldBegin(id: 1, type: .structure)  // message
+        write(&writer)
+        writer.writeFieldStop()  // end the message
+        writer.writeFieldStop()  // end the contents union
+        writer.writeFieldStop()  // end the holder
+      }
+      return encodeEvent(
+        MessageEvent(
+          messageId: "m", senderId: "1111", conversationId: "1111:2222",
+          detail: .messageCreate(MessageCreateEvent(contents: contents))))
+    }
+    let messages: [(name: String, eventB64: String, failure: XChatError.ThriftFailure)] = [
+      (
+        "text",
+        message {
+          $0.writeFieldBegin(id: 1, type: .binary)
+          $0.writeBinary([0xFF])
+        },
+        .invalidUTF8
+      ),
+      (
+        "entities",
+        message {
+          $0.writeFieldBegin(id: 2, type: .list)
+          $0.writeListBegin(elementType: .binary, count: 0)
+        },
+        .listElementType(field: "entities", actual: .binary, expected: .structure)
+      ),
+      (
+        "additional fields",
+        message {
+          $0.writeFieldBegin(id: 10, type: .map)
+          $0.writeMapBegin(keyType: .i32, valueType: .binary, count: 0)
+        },
+        .mapTypes(field: "additional_fields", key: .i32, value: .binary)
+      ),
+      (
+        "attachment",
+        message {
+          $0.writeFieldBegin(id: 3, type: .list)
+          $0.writeListBegin(elementType: .structure, count: 1)
+          $0.writeFieldStop()  // an attachment that sets no variant
+        },
+        .messageAttachmentWithoutVariant
+      ),
+      (
+        "preview attachment",
+        message {
+          $0.writeFieldBegin(id: 4, type: .structure)  // replying_to_preview
+          $0.writeFieldBegin(id: 4, type: .list)  // attachments
+          $0.writeListBegin(elementType: .structure, count: 1)
+          $0.writeFieldStop()  // an attachment that sets no variant
+          $0.writeFieldStop()  // end the preview
+        },
+        .previewAttachmentWithoutVariant
+      ),
+    ]
+    for (name, eventB64, failure) in messages {
+      XCTAssertThrowsError(
+        try XChatCore(rejectUnverified: false).decryptEvent(eventB64), name
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .parse(.messageContents(.message, failure)), name)
+      }
+    }
+  }
+
   /// A signature that is checked and fails says why, for a message thrown
   /// by decryptEvent and for a key change collected by decryptEvents.
   func testRejectedSignaturesSayWhy() throws {

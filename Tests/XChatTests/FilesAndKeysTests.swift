@@ -546,6 +546,123 @@ final class FilesAndKeysTests: XCTestCase {
     }
   }
 
+  /// Opening media a received reply quotes, an embedded event that cannot
+  /// be opened is reported for the quoted message by what is wrong with
+  /// it, from `decryptFile` and `fileDecryptor` alike: an event that is not
+  /// a message, one from another conversation, an edit, a reaction, and an
+  /// unencrypted message.
+  func testQuotedEventThatCannotBeOpenedNamesWhy() throws {
+    let core = XChatCore()
+    let mediaHashKey = TestVectors.string("media_first_hash_key")
+    let quotedB64 = TestVectors.string("event_message_key_b64")
+    let reply = try reply(quoting: quotedB64, quotedKeys: try Self.messageKeyMap())
+    let quoted = try core.parseEvent(quotedB64)
+    let quotedKey = try core.messageKey(
+      of: quoted,
+      conversationKey: try XCTUnwrap(
+        try Self.messageKeyMap()[TestVectors.string("message_key_conversation_key_version")]),
+      role: .quotedMessage)
+
+    // The quoted event with other contents, under its own message key,
+    // which the reply carries.
+    func quotedEvent(with contents: MessageEntryContents) throws -> MessageEvent {
+      var holder = MessageEntryHolder()
+      holder.contents = contents
+      var writer = ThriftWriter()
+      holder.write(to: &writer)
+      return try core.parseEvent(
+        try replacingContents(
+          quotedB64, with: try encryptMessage(key: quotedKey, plaintext: writer.data)))
+    }
+    var keyChange = try core.parseEvent(TestVectors.string("event_key_change_b64"))
+    keyChange.conversationId = quoted.conversationId
+    var otherConversation = quoted
+    otherConversation.conversationId = "1:2"
+    var unencrypted = quoted
+    if case .messageCreate(var create)? = unencrypted.detail {
+      create.conversationKeyVersion = nil
+      unencrypted.detail = .messageCreate(create)
+    }
+
+    let events: [(name: String, event: MessageEvent, failure: XChatError.InputFailure)] = [
+      ("key change", keyChange, .notMessageEvent(.quotedMessage)),
+      ("other conversation", otherConversation, .quotedMessageInOtherConversation),
+      (
+        "edit",
+        try quotedEvent(
+          with: .messageEdit(
+            MessageEdit(
+              messageSequenceId: "5", updatedText: "edited", entities: nil, messageId: "m"))),
+        .messageIsEdit(.quotedMessage)
+      ),
+      (
+        "reaction",
+        try quotedEvent(
+          with: .reactionAdd(
+            MessageReactionAdd(messageSequenceId: "5", emoji: "👍", messageAttachmentId: nil))),
+        .notTextMessage(.quotedMessage)
+      ),
+      ("unencrypted", unencrypted, .notEncrypted(.quotedMessage)),
+    ]
+    for (name, event, failure) in events {
+      let replyB64 = try rewritingReply(reply.eventB64, keys: reply.keys) {
+        $0.replyingToPreview?.rawEventMessageCreate = event
+      }
+      XCTAssertThrowsError(
+        try core.decryptFile(
+          [], eventB64: replyB64, conversationKeys: reply.keys, mediaHashKey: mediaHashKey),
+        name
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(failure), name)
+      }
+      XCTAssertThrowsError(
+        try core.fileDecryptor(
+          eventB64: replyB64, conversationKeys: reply.keys, mediaHashKey: mediaHashKey),
+        name
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(failure), name)
+      }
+    }
+  }
+
+  /// The four file calls open a message's event, so an event of another
+  /// kind is refused as not a message.
+  func testFileCallsRefuseAnEventThatIsNotAMessage() throws {
+    let core = XChatCore()
+    let keyChange = TestVectors.string("event_key_change_b64")
+    let (version, key) = try XCTUnwrap(try Self.messageKeyMap().first)
+    let expected = XChatError.invalidInput(.notMessageEvent(.message))
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: keyChange, conversationKeys: [version: key], mediaHashKey: "h")
+    ) { error in
+      XCTAssertEqual(error as? XChatError, expected)
+    }
+    XCTAssertThrowsError(
+      try core.fileDecryptor(
+        eventB64: keyChange, conversationKeys: [version: key], mediaHashKey: "h")
+    ) { error in
+      XCTAssertEqual(error as? XChatError, expected)
+    }
+    XCTAssertThrowsError(
+      try core.encryptFile(
+        [1], eventB64: keyChange, conversationKey: key, conversationKeyVersion: version,
+        mediaHashKey: "h")
+    ) { error in
+      XCTAssertEqual(error as? XChatError, expected)
+    }
+    // FileEncryptor is noncopyable, which XCTAssertThrowsError cannot
+    // return.
+    do {
+      _ = try core.fileEncryptor(
+        eventB64: keyChange, conversationKey: key, conversationKeyVersion: version,
+        mediaHashKey: "h")
+      XCTFail("expected an error")
+    } catch {
+      XCTAssertEqual(error as? XChatError, expected)
+    }
+  }
+
   // MARK: Outgoing files
 
   func testOutgoingFileRoundTrip() throws {
