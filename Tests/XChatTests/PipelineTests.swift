@@ -134,6 +134,20 @@ final class PipelineTests: XCTestCase {
       XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
     }
 
+    // With the right key, an event the signed payload cannot be rebuilt
+    // from, here for lack of its message id, cannot be checked either.
+    let withoutMessageId = try rewritingEvent(TestVectors.string("event_message_b64")) {
+      $0.messageId = nil
+    }
+    XCTAssertThrowsError(
+      try XChatCore().decryptEvent(
+        withoutMessageId,
+        conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
+        signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
+    }
+
     // With the policy off the message decrypts, marked unverified.
     let permissive = XChatCore(rejectUnverified: false)
     let message = try message(

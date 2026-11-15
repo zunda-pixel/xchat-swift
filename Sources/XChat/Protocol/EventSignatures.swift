@@ -40,7 +40,8 @@ enum EventSignatureCheck: Sendable, Equatable {
   /// The signature matched the key at the event's key version.
   case verified
   /// There was nothing to check: no signature, no key at that version, or
-  /// no payload layout for the event type.
+  /// no payload rebuilt from the event, because its type has no layout, it
+  /// lacks a field the layout signs, or a field contains a comma.
   case unverifiable
   /// A signature is present but cannot be accepted, for the given reason.
   case failed(XChatError.SignatureFailure)

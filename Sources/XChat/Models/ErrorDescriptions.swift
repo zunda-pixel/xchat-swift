@@ -1,7 +1,9 @@
 public import Foundation
 
-/// English descriptions for logs, built from each case and its values. The
-/// cases, not these strings, are what callers match on.
+/// English descriptions for developers and logs, built from each case and
+/// its values. They are not localized and not meant for users: the cases,
+/// not these strings, are what callers match on, and an app shows its own
+/// text for the cases it handles.
 ///
 /// Only `XChatError` describes itself in English. Its nested enums print as
 /// Swift writes their cases, and its debug description is the expression
@@ -9,8 +11,16 @@ public import Foundation
 /// match.
 
 extension XChatError: LocalizedError, CustomStringConvertible, CustomDebugStringConvertible {
+  /// The same English text as `description`, for developers and logs. It is
+  /// neither localized nor meant for users: match the case and show text of
+  /// your own. `LocalizedError` is adopted so that `localizedDescription`
+  /// describes the case when the error is held as `any Error`, where
+  /// Foundation would otherwise give generic text, not to make this text
+  /// fit for display.
   public var errorDescription: String? { description }
 
+  /// The case and its values in English, for developers and logs; see
+  /// `errorDescription`.
   public var description: String {
     switch self {
     case .invalidInput(let failure): failure.explanation
@@ -138,9 +148,10 @@ extension XChatError.InputFailure {
       "media_hash_key is empty: pass the media hash key of the attachment, as the "
         + "message lists it"
     case .mediaHashKeyNotFound(let mediaHashKey, let available) where available.isEmpty:
-      "media_hash_key '\(mediaHashKey)' is not in the message, which has no media"
+      "media_hash_key '\(mediaHashKey)' is not among the media hash keys this call can use: "
+        + "there are none"
     case .mediaHashKeyNotFound(let mediaHashKey, let available):
-      "media_hash_key '\(mediaHashKey)' is not in the message, whose media hash keys are "
+      "media_hash_key '\(mediaHashKey)' is not among the media hash keys this call can use: "
         + available.joined(separator: ", ")
     case .quotedMediaHashKey(let mediaHashKey):
       "media_hash_key '\(mediaHashKey)' is media the reply quotes: its file belongs to "
@@ -362,8 +373,9 @@ extension XChatError.VerificationFailure {
   var explanation: String {
     switch self {
     case .unverifiable(let event):
-      "\(event.name) signature could not be verified: signature missing or no matching "
-        + "signing key"
+      "\(event.name) signature could not be verified: the event carries no signature, no "
+        + "signing key was given at its key version, or the signed payload cannot be rebuilt "
+        + "from the event"
     case .rejected(let event, let failure):
       "\(event.name) signature verification failed: \(failure.explanation)"
     }

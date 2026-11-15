@@ -143,9 +143,12 @@ extension XChatError {
     case quotedMessageInOtherConversation
     /// The media hash key is empty.
     case emptyMediaHashKey
-    /// The media hash key is not among the message's media. `available`
-    /// lists the message's media hash keys in order; it is empty when the
-    /// message has no media.
+    /// The media hash key is not among the media the call can use.
+    /// `available` lists the media hash keys it can, in order: the
+    /// message's own, then, when receiving (`decryptFile`, `fileDecryptor`),
+    /// those of the message a reply quotes. A sending call (`encryptFile`,
+    /// `fileEncryptor`) encrypts only the message's own files, so there it
+    /// lists only those. It is empty when there are none.
     case mediaHashKeyNotFound(String, available: [String])
     /// The media hash key names media the reply quotes: its file belongs to
     /// the quoted message and was uploaded with it, so there is nothing to
@@ -390,9 +393,16 @@ extension XChatError {
 extension XChatError {
   /// Why a signature did not verify.
   public enum VerificationFailure: Sendable, Hashable {
-    /// An event's signature could not be checked: the event carries none,
-    /// or no signing key was given at its key version. Thrown while
-    /// unverified events are rejected.
+    /// An event's signature could not be checked, and unverified events are
+    /// rejected. The event carries no signature (an unencrypted message
+    /// never does), no signing key was given at its key version, or the
+    /// payload the signature covers cannot be rebuilt from the event: the
+    /// event lacks a field the payload signs (its message id or sender id;
+    /// for a key change, also its conversation-key version, and before
+    /// signature version 6 its participants' keys, or from version 6 on the
+    /// plaintext conversation key, which this device could not decrypt and
+    /// no key was given for), or a field contains a comma, which the
+    /// comma-joined payload cannot hold unambiguously.
     case unverifiable(SignedEvent)
     /// An event's signature was checked and does not hold.
     case rejected(SignedEvent, SignatureFailure)

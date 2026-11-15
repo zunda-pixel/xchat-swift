@@ -455,6 +455,30 @@ final class FilesAndKeysTests: XCTestCase {
     }
   }
 
+  /// A received reply opens the media of the message it quotes too, so a
+  /// media hash key that is in neither lists the quoted message's keys
+  /// after the reply's own (here, none).
+  func testUnknownMediaHashOfAReplyListsTheQuotedMessagesHashes() throws {
+    let core = XChatCore()
+    let reply = try reply(
+      quoting: TestVectors.string("event_message_key_b64"),
+      quotedKeys: try Self.messageKeyMap())
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: reply.eventB64, conversationKeys: reply.keys, mediaHashKey: "nope")
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .invalidInput(
+          .mediaHashKeyNotFound(
+            "nope",
+            available: [
+              TestVectors.string("media_first_hash_key"),
+              TestVectors.string("media_second_hash_key"),
+            ])))
+    }
+  }
+
   // MARK: Outgoing files
 
   func testOutgoingFileRoundTrip() throws {

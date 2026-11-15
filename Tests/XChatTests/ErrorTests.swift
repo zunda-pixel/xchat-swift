@@ -85,9 +85,11 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
   let notFound = XChatError.invalidInput(.mediaHashKeyNotFound("h", available: ["a", "b"]))
   #expect(
     notFound.description
-      == "media_hash_key 'h' is not in the message, whose media hash keys are a, b")
+      == "media_hash_key 'h' is not among the media hash keys this call can use: a, b")
   let noMedia = XChatError.invalidInput(.mediaHashKeyNotFound("h", available: []))
-  #expect(noMedia.description == "media_hash_key 'h' is not in the message, which has no media")
+  #expect(
+    noMedia.description
+      == "media_hash_key 'h' is not among the media hash keys this call can use: there are none")
   let missingKey = XChatError.decryption(
     .missingConversationKey(.quotedMessage, version: "2", available: ["1"]))
   #expect(
