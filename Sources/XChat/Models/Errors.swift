@@ -145,10 +145,18 @@ extension XChatError {
     case emptyMediaHashKey
     /// The media hash key is not among the media the call can use.
     /// `available` lists the media hash keys it can, in order: the
-    /// message's own, then, when receiving (`decryptFile`, `fileDecryptor`),
-    /// those of the message a reply quotes. A sending call (`encryptFile`,
-    /// `fileEncryptor`) encrypts only the message's own files, so there it
-    /// lists only those. It is empty when there are none.
+    /// message's own, then, when receiving (`decryptFile`, `fileDecryptor`)
+    /// a reply whose quoted message the call can open, that message's. A
+    /// sending call (`encryptFile`, `fileEncryptor`) encrypts only the
+    /// message's own files, so there it lists only those. It is empty when
+    /// there are none.
+    ///
+    /// When a received reply's quoted message cannot be opened (no key was
+    /// given for it, it is not embedded, or it is not a text message),
+    /// `available` lists only the reply's own media: the media hash keys
+    /// the reply's preview shows are written by the sender, not read from
+    /// the quoted message. Passing one of those reports why the quoted
+    /// message cannot be opened instead.
     case mediaHashKeyNotFound(String, available: [String])
     /// The media hash key names media the reply quotes: its file belongs to
     /// the quoted message and was uploaded with it, so there is nothing to

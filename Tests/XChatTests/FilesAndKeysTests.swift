@@ -515,6 +515,37 @@ final class FilesAndKeysTests: XCTestCase {
     }
   }
 
+  /// When a received reply's quoted message cannot be opened (here, no key
+  /// for its v0 version), an unknown media hash key lists only the reply's
+  /// own media: the keys the preview shows are the sender's, unchecked, and
+  /// passing one of them reports why the quoted message cannot be opened.
+  func testUnknownMediaHashOfAReplyWhoseQuotedMessageDoesNotOpen() throws {
+    let core = XChatCore()
+    let reply = try reply(
+      quoting: TestVectors.string("event_conversation_key_media_b64"),
+      quotedKeys: ["1001": TestVectors.bytes("conversation_key_b64")])
+    let withOwnMedia = try rewritingReply(reply.eventB64, keys: reply.keys) {
+      $0.attachments = [.media(MediaAttachment(mediaHashKey: "own"))]
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: withOwnMedia, conversationKeys: reply.keys, mediaHashKey: "nope")
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .invalidInput(.mediaHashKeyNotFound("nope", available: ["own"])))
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: withOwnMedia, conversationKeys: reply.keys,
+        mediaHashKey: TestVectors.string("media_conversation_key_hash_key"))
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .missingConversationKey(.quotedMessage, version: "1001", available: ["999999"])))
+    }
+  }
+
   // MARK: Outgoing files
 
   func testOutgoingFileRoundTrip() throws {

@@ -109,25 +109,26 @@ extension XChatCore {
       return key
     }
 
-    var known = mediaHashKeys(message.contents.attachments)
+    var available = mediaHashKeys(message.contents.attachments)
     if let preview = message.contents.replyingToPreview {
-      let shown = mediaHashKeys(preview.attachments)
       do {
         let quoted = try openQuoted(
           event, preview: preview, conversationKeys: conversationKeys)
         if let key = attachmentKey(quoted, mediaHashKey: mediaHashKey) {
           return key
         }
-        known += mediaHashKeys(quoted.contents.attachments)
+        available += mediaHashKeys(quoted.contents.attachments)
       } catch {
-        // When the preview shows this media, why its message cannot
-        // be opened is the answer; otherwise it is not quoted here.
-        if shown.contains(mediaHashKey) { throw error }
-        known += shown
+        // When the preview shows this media, why its message cannot be
+        // opened is the answer. Otherwise the preview's media hash keys are
+        // not listed as available: the sender wrote them, unchecked against
+        // a message this call cannot open, and passing one of them throws
+        // this error.
+        if mediaHashKeys(preview.attachments).contains(mediaHashKey) { throw error }
       }
     }
 
-    throw XChatError.invalidInput(.mediaHashKeyNotFound(mediaHashKey, available: known))
+    throw XChatError.invalidInput(.mediaHashKeyNotFound(mediaHashKey, available: available))
   }
 
   /// The key a file is encrypted under for an outgoing message: the key of
