@@ -20,8 +20,9 @@ extension XChatCore {
   }
 
   /// The switch names a response body turns on, or nil when the body is not
-  /// a JSON object with a `features` object. Members whose value is not a
-  /// boolean read off; other top-level members are ignored.
+  /// a JSON object with a `features` object, or when a member fails to decode
+  /// for a reason other than its type. Members whose value is not a boolean
+  /// read off; other top-level members are ignored.
   static func parseFeatures(_ body: [UInt8]) -> Set<String>? {
     guard let response = try? JSONDecoder().decode(FeatureResponse.self, from: Data(body))
     else { return nil }
@@ -45,8 +46,9 @@ extension XChatCore {
     /// with `decodeNil()` first: `SingleValueDecodingContainer` documents
     /// `valueNotFound` for it, and the new JSON decoder on swift-foundation's
     /// main branch (swiftlang/swift-foundation#2263) throws that (Foundation
-    /// in Swift 6.4 and on macOS 27.2 reports `typeMismatch`). A failure other than a type mismatch still
-    /// throws, although JSONDecoder reports none here.
+    /// in Swift 6.4 and on macOS 27.2 reports `typeMismatch`). A failure
+    /// other than a type mismatch still throws, although JSONDecoder reports
+    /// none here.
     init(from decoder: any Decoder) throws {
       let value = try decoder.singleValueContainer()
       if value.decodeNil() {
