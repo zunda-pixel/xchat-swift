@@ -17,12 +17,63 @@ import XChat
   #expect(withValue.localizedDescription == "Conversation key must be 32 bytes, got 31")
 }
 
-/// The debug description is the case to match, not the English sentence,
-/// and nested values print as their cases rather than as sentence
-/// fragments.
-@Test func debugDescriptionShowsTheCase() {
-  let error = XChatError.invalidInput(.conversationKeyLength(31))
-  #expect(String(reflecting: error) == "XChatError.invalidInput(.conversationKeyLength(31))")
+/// The debug description is the expression that builds the error, not the
+/// English sentence: every nested case is written as the pattern to match,
+/// with its values and their labels, and without module-qualified type
+/// names.
+@Test(arguments: [
+  (
+    XChatError.invalidInput(.conversationKeyLength(31)),
+    "XChatError.invalidInput(.conversationKeyLength(31))"
+  ),
+  (.invalidState(.keysNotLoaded), "XChatError.invalidState(.keysNotLoaded)"),
+  (
+    .decryption(
+      .messageContents(.quotedMessage, .authenticationFailed, key: .carriedByReply(version: "2"))
+    ),
+    #"XChatError.decryption(.messageContents(.quotedMessage, .authenticationFailed, "#
+      + #"key: .carriedByReply(version: "2")))"#
+  ),
+  (
+    .invalidInput(.attachment(index: 0, .nonPositiveFilesize)),
+    "XChatError.invalidInput(.attachment(index: 0, .nonPositiveFilesize))"
+  ),
+  (
+    .invalidInput(.mediaHashKeyNotFound("h", available: ["a", "b"])),
+    #"XChatError.invalidInput(.mediaHashKeyNotFound("h", available: ["a", "b"]))"#
+  ),
+  (
+    .invalidInput(.mediaHashKeyNotFound("h", available: [])),
+    #"XChatError.invalidInput(.mediaHashKeyNotFound("h", available: []))"#
+  ),
+  (
+    .decryption(.file(.unknownTag(16), mediaHashKey: nil)),
+    "XChatError.decryption(.file(.unknownTag(16), mediaHashKey: nil))"
+  ),
+  (
+    .decryption(.file(.truncated, mediaHashKey: "h")),
+    #"XChatError.decryption(.file(.truncated, mediaHashKey: "h"))"#
+  ),
+  (
+    .parse(.event(.thrift(.fieldType(field: "id", id: 1, actual: .binary, expected: .i64)))),
+    #"XChatError.parse(.event(.thrift(.fieldType(field: "id", id: 1, actual: .binary, "#
+      + #"expected: .i64))))"#
+  ),
+  (
+    .verification(.rejected(.keyChange, .signatureVersionTooOld(2, minimum: 7))),
+    "XChatError.verification(.rejected(.keyChange, .signatureVersionTooOld(2, minimum: 7)))"
+  ),
+  (
+    .internalError(.unexpected(#"say "hi""#)),
+    #"XChatError.internalError(.unexpected("say \"hi\""))"#
+  ),
+])
+func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expected: String) {
+  #expect(String(reflecting: error) == expected)
+}
+
+/// The nested enums print as their cases, not as sentence fragments.
+@Test func nestedValuesPrintAsTheirCases() {
   #expect(String(describing: XChatError.MessageRole.quotedMessage) == "quotedMessage")
   #expect(String(describing: XChatError.SignedEvent.keyChange) == "keyChange")
 }

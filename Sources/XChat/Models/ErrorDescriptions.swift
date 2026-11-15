@@ -4,8 +4,9 @@ public import Foundation
 /// cases, not these strings, are what callers match on.
 ///
 /// Only `XChatError` describes itself in English. Its nested enums print as
-/// Swift writes their cases, so a nested value in a log or the debugger
-/// shows the case to match.
+/// Swift writes their cases, and its debug description is the expression
+/// that builds it, so a value in a log or the debugger shows the case to
+/// match.
 
 extension XChatError: LocalizedError, CustomStringConvertible, CustomDebugStringConvertible {
   public var errorDescription: String? { description }
@@ -21,19 +22,53 @@ extension XChatError: LocalizedError, CustomStringConvertible, CustomDebugString
     }
   }
 
-  /// The case and its values as Swift writes them, such as
-  /// `XChatError.invalidInput(.conversationKeyLength(31))`, so debugging
-  /// shows which case to match.
+  /// The error as the Swift expression that builds it, with every nested
+  /// case written `.name(values)`, such as
+  /// `XChatError.invalidInput(.attachment(index: 2, .emptyFilename))`, so
+  /// debugging shows the pattern to match at any depth.
   public var debugDescription: String {
-    switch self {
-    case .invalidInput(let failure): "XChatError.invalidInput(.\(failure))"
-    case .invalidState(let failure): "XChatError.invalidState(.\(failure))"
-    case .parse(let failure): "XChatError.parse(.\(failure))"
-    case .decryption(let failure): "XChatError.decryption(.\(failure))"
-    case .verification(let failure): "XChatError.verification(.\(failure))"
-    case .internalError(let failure): "XChatError.internalError(.\(failure))"
-    }
+    "XChatError" + caseExpression(self)
   }
+}
+
+/// `value` as Swift writes it where its type is implied: an enum case as
+/// `.name` or `.name(values)`, an optional as its value or `nil`, an array
+/// in brackets, and anything else as `String(reflecting:)` writes it (a
+/// string quoted, a number in digits).
+///
+/// It reads the cases through `Mirror` rather than a switch per nested
+/// enum, which every added case would have to extend. A case without
+/// values has no payload to reflect, so its name is its description: the
+/// nested enums do not describe themselves, so Swift prints the case name.
+private func caseExpression(_ value: Any) -> String {
+  let mirror = Mirror(reflecting: value)
+  switch mirror.displayStyle {
+  case .enum:
+    guard let payload = mirror.children.first, let name = payload.label else {
+      return ".\(value)"
+    }
+    return ".\(name)(\(caseArguments(payload.value)))"
+  case .optional:
+    return mirror.children.first.map { caseExpression($0.value) } ?? "nil"
+  case .collection:
+    return "[" + mirror.children.map { caseExpression($0.value) }.joined(separator: ", ") + "]"
+  default:
+    return String(reflecting: value)
+  }
+}
+
+/// A case's values. A payload of several values, or of one labeled value,
+/// reflects as a tuple whose unlabeled elements `Mirror` names `.0`, `.1`,
+/// and so on; those are written without a label.
+private func caseArguments(_ payload: Any) -> String {
+  let mirror = Mirror(reflecting: payload)
+  guard mirror.displayStyle == .tuple else { return caseExpression(payload) }
+  return mirror.children.map { element in
+    let value = caseExpression(element.value)
+    guard let label = element.label, !label.hasPrefix(".") else { return value }
+    return "\(label): \(value)"
+  }
+  .joined(separator: ", ")
 }
 
 extension XChatError.InputFailure {
