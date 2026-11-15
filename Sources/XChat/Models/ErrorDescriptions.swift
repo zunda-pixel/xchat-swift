@@ -6,9 +6,13 @@ public import Foundation
 /// text for the cases it handles.
 ///
 /// Every description is a sentence that starts with a capital letter. What
-/// a nested value adds after a colon (an attachment's fault, a Thrift
-/// failure, a signature failure) is a fragment that starts as it would
-/// mid-sentence, often with a field name as the other bindings write it.
+/// a nested failure adds after a colon (an attachment's fault, a base64,
+/// hex or Thrift failure, a signature failure) is a fragment that starts
+/// as it would mid-sentence, often with a field name as the other bindings
+/// write it. The case that holds it names what was read or checked, and
+/// the fragment does not repeat that ("Invalid base64 event: byte '!'
+/// (0x21) is not in the alphabet"). A count takes the singular for one
+/// ("1 character").
 ///
 /// Only `XChatError` describes itself in English. Its nested enums print as
 /// Swift writes their cases, and its debug description is the expression
@@ -114,8 +118,9 @@ extension XChatError.InputFailure {
     case .noParticipants:
       "Invalid public_keys: must not be empty"
     case .conversationIdNotDerivable(let distinctUsers):
-      "Cannot derive a one-to-one conversation id from \(distinctUsers) distinct user(s); "
-        + "pass conversation_id explicitly for group conversations"
+      "Cannot derive a one-to-one conversation id from "
+        + "\(counted(distinctUsers, "distinct user")); pass conversation_id explicitly for "
+        + "group conversations"
     case .signaturePayloadContainsComma:
       "Signature payload contains comma-separated component"
     case .entityRange(let start, let end):
@@ -251,8 +256,8 @@ extension XChatError.StateFailure {
 extension XChatError.ParseFailure {
   var explanation: String {
     switch self {
-    case .base64(let failure): failure.explanation
-    case .hex(let failure): failure.explanation
+    case .base64(let failure): "Invalid base64: \(failure.explanation)"
+    case .hex(let failure): "Invalid hex: \(failure.explanation)"
     case .event(.base64(let failure)): "Invalid base64 event: \(failure.explanation)"
     case .event(.thrift(let failure)): "Thrift parse error: \(failure.explanation)"
     case .messageContents(let role, let failure):
@@ -264,11 +269,11 @@ extension XChatError.ParseFailure {
 extension XChatError.Base64Failure {
   var explanation: String {
     switch self {
-    case .dataAfterPadding: "Invalid base64: '=' is followed by data"
-    case .invalidByte(let byte): "Invalid base64 byte: \(describeByte(byte))"
+    case .dataAfterPadding: "'=' is followed by data"
+    case .invalidByte(let byte): "byte \(describeByte(byte)) is not in the alphabet"
     case .invalidLength(let length):
-      "Invalid base64 length: \(length) characters, not counting '=', which no bytes encode to"
-    case .excessPadding(let count): "Invalid base64 padding: \(count) '=', at most 2"
+      "\(counted(length, "character")) before any '=', a length no bytes encode to"
+    case .excessPadding(let count): "\(count) '=' of padding, where at most 2 are accepted"
     }
   }
 }
@@ -276,10 +281,16 @@ extension XChatError.Base64Failure {
 extension XChatError.HexFailure {
   var explanation: String {
     switch self {
-    case .oddLength(let length): "Invalid hex length: \(length)"
-    case .invalidByte(let byte): "Invalid hex byte: \(describeByte(byte))"
+    case .oddLength(let length): "\(counted(length, "byte")), an odd number"
+    case .invalidByte(let byte): "byte \(describeByte(byte)) is not a hex digit"
     }
   }
+}
+
+/// `count` and `noun`, in the plural unless the count is one: `1 byte`,
+/// `0 bytes`, `31 bytes`. Every noun passed takes an `s`.
+private func counted(_ count: Int, _ noun: String) -> String {
+  "\(count) \(noun)\(count == 1 ? "" : "s")"
 }
 
 /// A byte of a string's UTF-8 as hex, after its character when that is
@@ -342,6 +353,9 @@ extension XChatError.DecryptionFailure {
     case .missingConversationKey(let role, let version, let available) where available.isEmpty:
       "\(role.subject) is encrypted under conversation-key version '\(version)', and there "
         + "were no conversation keys"
+    case .missingConversationKey(let role, let version, let available) where available.count == 1:
+      "\(role.subject) is encrypted under conversation-key version '\(version)', and there "
+        + "was no key for it; there was a key for version \(available[0])"
     case .missingConversationKey(let role, let version, let available):
       "\(role.subject) is encrypted under conversation-key version '\(version)', and there "
         + "was no key for it; there were keys for versions "
@@ -375,8 +389,8 @@ extension XChatError.DecryptionFailure {
     case .ciphertextTooShort:
       "The contents of \(role.noun) are too short to be encrypted contents"
     case .keyLength(let length):
-      "The contents of \(role.noun) cannot be decrypted under \(source): it is \(length) "
-        + "bytes, not 32"
+      "The contents of \(role.noun) cannot be decrypted under \(source): it is "
+        + "\(counted(length, "byte")), not 32"
     }
   }
 

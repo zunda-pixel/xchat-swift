@@ -180,8 +180,8 @@ extension XChatCore {
 
   /// Prepares a signed conversation-key change: a fresh key, each
   /// participant's ECIES-encrypted copy of it, and the signed event the
-  /// API persists. `conversationId` may be omitted for a one-to-one, where
-  /// it is derived from the two participants.
+  /// API persists. `conversationId` may be omitted (or empty) for a
+  /// one-to-one, where it is derived from the two participants.
   public func prepareConversationKeyChange(
     participants: [ConversationParticipantPublicKey],
     conversationId: String? = nil,

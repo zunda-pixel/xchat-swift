@@ -193,6 +193,42 @@ final class SendTests: XCTestCase {
     }
   }
 
+  /// A conversation id that contains a comma is refused, not signed: the
+  /// signed payload joins its components with commas, so it could be read
+  /// as other components. Such an id is no pair of user ids, so it is
+  /// signed as given, from a message of either version and a key change.
+  func testAConversationIdWithACommaIsRefused() throws {
+    for version in [SendVersion.v0, .v1] {
+      let (core, _) = try makeCore(version: version)
+      XCTAssertThrowsError(
+        try core.encryptMessage(
+          text: "x", conversationId: "1111,2222", conversationKey: Self.conversationKey,
+          conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+      ) { error in
+        XCTAssertEqual(
+          error as? XChatError, .invalidInput(.signaturePayloadContainsComma), "\(version)")
+      }
+    }
+
+    let (core, _) = try makeCore()
+    XCTAssertThrowsError(
+      try core.prepareConversationKeyChange(
+        participants: [
+          ConversationParticipantPublicKey(
+            userId: Self.senderId,
+            identityPublicKey: TestVectors.string("identity_public_b64"),
+            publicKeyVersion: "1"),
+          ConversationParticipantPublicKey(
+            userId: "2222",
+            identityPublicKey: Base64.encodeStandard(generateKeyPair().publicKey),
+            publicKeyVersion: "1"),
+        ],
+        conversationId: "1111,2222", senderId: Self.senderId, conversationKeyVersion: "5000")
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.signaturePayloadContainsComma))
+    }
+  }
+
   // MARK: Replies
 
   func testReplyEmbedsAndValidatesTheOriginal() throws {

@@ -114,9 +114,9 @@ extension XChatError {
 
     /// A conversation-key change was asked for with no participants.
     case noParticipants
-    /// No conversation id was passed, and the participants are not two
-    /// distinct users, so no one-to-one id derives from them. The value is
-    /// the number of distinct users.
+    /// No conversation id, or an empty one, was passed, and the
+    /// participants are not two distinct users, so no one-to-one id derives
+    /// from them. The value is the number of distinct users.
     case conversationIdNotDerivable(distinctUsers: Int)
     /// A component the signature covers contains a comma, which would make
     /// the comma-joined payload ambiguous.
@@ -200,8 +200,8 @@ extension XChatError {
     /// A media attachment's media type is none the protocol defines; the
     /// value is the one passed.
     case unknownMediaType(Int32)
-    /// A media attachment's plaintext SHA-256 is not the base64 of 32
-    /// bytes.
+    /// A media attachment's plaintext SHA-256 is given and not empty, and is
+    /// not the base64 of 32 bytes. An empty one is taken as not given.
     case plaintextSHA256
     /// A URL attachment's URL is empty.
     case emptyURL
@@ -501,10 +501,13 @@ extension XChatError {
   /// Why an event's signature was rejected.
   ///
   /// The signature's version is checked first, then the signing key at the
-  /// event's key version, then the signature against it. A key that is not
-  /// a P-256 public key is `invalidSigningPublicKey` whatever the signature
-  /// is: the key is the caller's, and no event signed at its version can
-  /// verify until it is replaced.
+  /// event's key version, then the signature's bytes against it. A key that
+  /// is not a P-256 public key is `invalidSigningPublicKey` even when the
+  /// signature's bytes are malformed too: the key is the caller's, and no
+  /// event signed at its version can verify until it is replaced. An event
+  /// with no signature is `VerificationFailure.unverifiable` before its
+  /// version is checked, and one with no signing key at its key version, or
+  /// whose signed payload cannot be rebuilt, before its key is.
   public enum SignatureFailure: Sendable, Hashable {
     /// The signature's version is missing or not an integer.
     case missingSignatureVersion

@@ -99,14 +99,21 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
 
 /// A missing conversation key lists the versions there were keys for,
 /// which in decryptEvents include those adopted from the batch's key
-/// changes, so the description does not say they were given.
+/// changes, so the description does not say they were given. One version
+/// is named in the singular.
 @Test func missingKeysListTheVersionsThereWereKeysFor() {
   let missingKey = XChatError.decryption(
-    .missingConversationKey(.quotedMessage, version: "2", available: ["1"]))
+    .missingConversationKey(.quotedMessage, version: "2", available: ["1", "3"]))
   #expect(
     missingKey.description
       == "The quoted message is encrypted under conversation-key version '2', and there was "
-      + "no key for it; there were keys for versions 1")
+      + "no key for it; there were keys for versions 1, 3")
+  let oneKey = XChatError.decryption(
+    .missingConversationKey(.quotedMessage, version: "2", available: ["1"]))
+  #expect(
+    oneKey.description
+      == "The quoted message is encrypted under conversation-key version '2', and there was "
+      + "no key for it; there was a key for version 1")
   let noKeys = XChatError.decryption(
     .missingConversationKey(.message, version: "2", available: []))
   #expect(
@@ -153,8 +160,8 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
 }
 
 /// Every description is a sentence that starts with a capital letter,
-/// whatever its case and role; what a nested value adds follows a colon,
-/// as it would mid-sentence.
+/// whatever its case and role, including base64 and hex that fail alone
+/// or in an event.
 @Test(arguments: [
   XChatError.invalidInput(.participantIdentityKey(userId: "5")),
   .invalidInput(.noParticipants),
@@ -175,6 +182,9 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
   .invalidState(.keysNotLoaded),
   .invalidState(.signingKeyNotLoaded),
   .invalidState(.signingKeyVersionNotSet),
+  .parse(.base64(.invalidLength(1))),
+  .parse(.hex(.invalidByte(0x0A))),
+  .parse(.event(.base64(.invalidByte(UInt8(ascii: "!"))))),
   .parse(.event(.thrift(.unexpectedEnd))),
   .parse(.messageContents(.quotedMessage, .invalidUTF8)),
   .decryption(.messageContents(.message, .ciphertextTooShort, key: .conversationKey(version: "1"))),
@@ -190,6 +200,85 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
 func descriptionsStartWithACapitalLetter(error: XChatError) throws {
   let first = try #require(error.description.first)
   #expect(first.isUppercase, "\(error.description)")
+}
+
+/// What a nested failure adds follows the colon of the case that holds it
+/// as a fragment, starting as it would mid-sentence: the case says what
+/// was read, and the fragment does not repeat it. Base64 is described the
+/// same alone and in an event, and a count of one takes the singular.
+@Test(arguments: [
+  (XChatError.parse(.base64(.dataAfterPadding)), "Invalid base64: '=' is followed by data"),
+  (.parse(.event(.base64(.dataAfterPadding))), "Invalid base64 event: '=' is followed by data"),
+  (
+    .parse(.base64(.invalidByte(UInt8(ascii: "!")))),
+    "Invalid base64: byte '!' (0x21) is not in the alphabet"
+  ),
+  (
+    .parse(.event(.base64(.invalidByte(UInt8(ascii: "!"))))),
+    "Invalid base64 event: byte '!' (0x21) is not in the alphabet"
+  ),
+  (
+    .parse(.base64(.invalidLength(5))),
+    "Invalid base64: 5 characters before any '=', a length no bytes encode to"
+  ),
+  (
+    .parse(.event(.base64(.invalidLength(1)))),
+    "Invalid base64 event: 1 character before any '=', a length no bytes encode to"
+  ),
+  (
+    .parse(.base64(.excessPadding(4))),
+    "Invalid base64: 4 '=' of padding, where at most 2 are accepted"
+  ),
+  (
+    .parse(.event(.base64(.excessPadding(3)))),
+    "Invalid base64 event: 3 '=' of padding, where at most 2 are accepted"
+  ),
+  (.parse(.hex(.oddLength(1))), "Invalid hex: 1 byte, an odd number"),
+  (.parse(.hex(.oddLength(3))), "Invalid hex: 3 bytes, an odd number"),
+  (.parse(.hex(.invalidByte(0x0A))), "Invalid hex: byte 0x0A is not a hex digit"),
+  (
+    .parse(
+      .event(.thrift(.fieldType(field: "message_id", id: 2, actual: .i32, expected: .binary)))),
+    "Thrift parse error: field message_id (#2) is i32, expected binary"
+  ),
+  (
+    .parse(.messageContents(.quotedMessage, .invalidUTF8)),
+    "Content parse error in the quoted message: input has invalid UTF-8"
+  ),
+  (
+    .invalidInput(.attachment(index: 2, .plaintextSHA256)),
+    "Invalid attachments[2]: plaintext_sha256 must be the base64 SHA-256 of the file's "
+      + "plaintext bytes"
+  ),
+  (
+    .verification(.rejected(.message, .malformedSignature)),
+    "Message signature verification failed: the signature is not a 64-byte ECDSA P-256 "
+      + "signature"
+  ),
+])
+func nestedFailuresAreFragmentsAfterAColon(error: XChatError, expected: String) throws {
+  #expect(error.description == expected)
+  let colon = try #require(error.description.range(of: ": "))
+  let fragment = error.description[colon.upperBound...]
+  #expect(fragment.first?.isUppercase == false, "\(error.description)")
+}
+
+/// A count of one takes the singular, and any other count the plural.
+@Test func countsOfOneAreSingular() {
+  #expect(
+    XChatError.invalidInput(.conversationIdNotDerivable(distinctUsers: 1)).description
+      == "Cannot derive a one-to-one conversation id from 1 distinct user; pass "
+      + "conversation_id explicitly for group conversations")
+  #expect(
+    XChatError.invalidInput(.conversationIdNotDerivable(distinctUsers: 3)).description
+      == "Cannot derive a one-to-one conversation id from 3 distinct users; pass "
+      + "conversation_id explicitly for group conversations")
+  #expect(
+    XChatError.decryption(
+      .messageContents(.message, .keyLength(1), key: .conversationKey(version: "1"))
+    ).description
+      == "The contents of the message cannot be decrypted under the conversation key for "
+      + "version '1': it is 1 byte, not 32")
 }
 
 /// A URL card's image is named by its field, before the image's own field.
@@ -230,10 +319,13 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
 @Test func invalidBytesAreDescribedAsHex() {
   #expect(
     XChatError.parse(.base64(.invalidByte(UInt8(ascii: "!")))).description
-      == "Invalid base64 byte: '!' (0x21)")
+      == "Invalid base64: byte '!' (0x21) is not in the alphabet")
   #expect(
-    XChatError.parse(.base64(.invalidByte(0xC3))).description == "Invalid base64 byte: 0xC3")
-  #expect(XChatError.parse(.hex(.invalidByte(0x0A))).description == "Invalid hex byte: 0x0A")
+    XChatError.parse(.base64(.invalidByte(0xC3))).description
+      == "Invalid base64: byte 0xC3 is not in the alphabet")
+  #expect(
+    XChatError.parse(.hex(.invalidByte(0x0A))).description
+      == "Invalid hex: byte 0x0A is not a hex digit")
 }
 
 /// A Thrift type byte that names no type is described as hex alone, even
@@ -267,9 +359,20 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
   #expect(throws: XChatError.parse(.event(.base64(.invalidLength(1))))) {
     try XChatCore().decryptEvent("A")
   }
-  #expect(
-    XChatError.parse(.base64(.invalidLength(5))).description
-      == "Invalid base64 length: 5 characters, not counting '=', which no bytes encode to")
+}
+
+/// Base64 with data after its `=` padding is refused from either decoder
+/// and from an event that travels as base64.
+@Test func base64WithDataAfterPaddingIsRefused() {
+  #expect(throws: XChatError.parse(.base64(.dataAfterPadding))) {
+    try Base64.decodeStandard("AA=A")
+  }
+  #expect(throws: XChatError.parse(.base64(.dataAfterPadding))) {
+    try Base64.decodeURLSafe("AA=A")
+  }
+  #expect(throws: XChatError.parse(.event(.base64(.dataAfterPadding)))) {
+    try XChatCore().decryptEvent("AA=A")
+  }
 }
 
 /// Base64 that ends in more than two `=` reports how many, whatever its
@@ -284,9 +387,6 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
   #expect(throws: XChatError.parse(.base64(.invalidLength(1)))) {
     try Base64.decodeStandard("A===")
   }
-  #expect(
-    XChatError.parse(.base64(.excessPadding(4))).description
-      == "Invalid base64 padding: 4 '=', at most 2")
   // Up to two are accepted whatever the length.
   #expect(try Base64.decodeStandard("AAAA==") == [0, 0, 0])
 }

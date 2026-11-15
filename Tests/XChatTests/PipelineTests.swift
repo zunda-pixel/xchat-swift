@@ -224,9 +224,10 @@ final class PipelineTests: XCTestCase {
   }
 
   /// An event and a message's contents report what in them is malformed: a
-  /// string that is not UTF-8, a list or a map of other types than its
-  /// field's, and an attachment of the message or of the message its reply
-  /// preview shows that sets none of its variants.
+  /// field of another wire type than the schema's, a string that is not
+  /// UTF-8, a list or a map of other types than its field's, and an
+  /// attachment of the message or of the message its reply preview shows
+  /// that sets none of its variants.
   func testMalformedThriftNamesWhatIsWrong() throws {
     func encoded(_ write: (inout ThriftWriter) -> Void) -> [UInt8] {
       var writer = ThriftWriter()
@@ -246,6 +247,16 @@ final class PipelineTests: XCTestCase {
         })
     }
     let events: [(name: String, eventB64: String, failure: XChatError.ThriftFailure)] = [
+      (
+        "message id's type",
+        Base64.encodeStandard(
+          encoded {
+            $0.writeFieldBegin(id: 2, type: .i32)
+            $0.writeI32(1)
+            $0.writeFieldStop()
+          }),
+        .fieldType(field: "message_id", id: 2, actual: .i32, expected: .binary)
+      ),
       (
         "message id",
         Base64.encodeStandard(
