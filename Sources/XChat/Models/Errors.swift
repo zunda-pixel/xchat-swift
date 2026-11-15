@@ -317,7 +317,10 @@ extension XChatError {
     /// The key is not 32 bytes; the value is its length. Only a message
     /// encrypted under its conversation key itself reports this: a
     /// per-message key is derived to 32 bytes from a key of any length,
-    /// and then fails to authenticate.
+    /// and then fails to authenticate. The key a sending call sends under
+    /// is checked before any message is opened, as
+    /// `InputFailure.conversationKeyLength`, so this is about a key given
+    /// for opening received messages.
     case keyLength(Int)
   }
 

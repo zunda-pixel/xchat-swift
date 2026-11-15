@@ -56,6 +56,14 @@ extension XChatCore {
     replyToAttachmentId: String? = nil,
     replyToConversationKeys: [String: [UInt8]] = [:]
   ) throws -> EncryptedMessagePayload {
+    // The quoted message is opened first, with the reply's conversation key
+    // when it is under the same version. Checked only when signing, a key
+    // of the wrong length would fail as that message's contents not
+    // decrypting, and a malformed version or sender id as its key or
+    // conversation not matching.
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId)
     let version = sendVersion
     let messageId = outgoingMessageId(
       version: version, conversationKey: conversationKey,
@@ -318,15 +326,9 @@ extension XChatCore {
     ttlMilliseconds: Int64?,
     embeddedSigners: [(senderId: String, publicKeyVersion: String)]
   ) throws -> EncryptedMessagePayload {
-    guard conversationKey.count == 32 else {
-      throw XChatError.invalidInput(.conversationKeyLength(conversationKey.count))
-    }
-    guard isUserId(senderId) else {
-      throw XChatError.invalidInput(.senderId(senderId))
-    }
-    guard isKeyVersion(conversationKeyVersion) else {
-      throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
-    }
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId)
     guard let signingPrivateKey else {
       throw XChatError.invalidState(.signingKeyNotLoaded)
     }
@@ -424,6 +426,25 @@ extension XChatCore {
       encodedMessageEventSignature: Base64.encodeStandardPadded(signatureWriter.data),
       conversationKeyVersion: conversationKeyVersion,
       shouldNotify: notify)
+  }
+
+  /// Checks the parameters every send encrypts and signs with: a 32-byte
+  /// conversation key, a sender id and a conversation-key version in
+  /// canonical decimal form.
+  private func requireSendParameters(
+    conversationKey: [UInt8],
+    conversationKeyVersion: String,
+    senderId: String
+  ) throws {
+    guard conversationKey.count == 32 else {
+      throw XChatError.invalidInput(.conversationKeyLength(conversationKey.count))
+    }
+    guard isUserId(senderId) else {
+      throw XChatError.invalidInput(.senderId(senderId))
+    }
+    guard isKeyVersion(conversationKeyVersion) else {
+      throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
+    }
   }
 
   /// The message id for an outgoing send: a v1 message with files derives

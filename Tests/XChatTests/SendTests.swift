@@ -264,6 +264,43 @@ final class SendTests: XCTestCase {
     }
   }
 
+  /// A reply's own conversation key and version are reported as invalid
+  /// parameters, not as the quoted message failing to open, whether the
+  /// quoted message is under the conversation key itself (v0) or a key
+  /// derived from it (v1).
+  func testReplyChecksItsOwnParametersBeforeTheQuotedMessage() throws {
+    let (core, _) = try makeCore(version: .v1)
+    let quoted = [
+      (TestVectors.string("event_message_b64"), Self.conversationKeyVersion),
+      (
+        TestVectors.string("event_message_key_b64"),
+        TestVectors.string("message_key_conversation_key_version")
+      ),
+    ]
+    for (eventB64, version) in quoted {
+      XCTAssertThrowsError(
+        try core.encryptReply(
+          text: "a reply", replyToEventB64: eventB64, conversationId: Self.conversationId,
+          conversationKey: [UInt8](repeating: 0, count: 31), conversationKeyVersion: version,
+          senderId: Self.senderId),
+        version
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(31)), version)
+      }
+    }
+
+    XCTAssertThrowsError(
+      try core.encryptReply(
+        text: "a reply", replyToEventB64: TestVectors.string("event_message_b64"),
+        conversationId: Self.conversationId, conversationKey: Self.conversationKey,
+        conversationKeyVersion: "0" + Self.conversationKeyVersion, senderId: Self.senderId)
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .invalidInput(.conversationKeyVersion("0" + Self.conversationKeyVersion)))
+    }
+  }
+
   // MARK: Reactions and edits
 
   func testReactionRoundTrips() throws {
