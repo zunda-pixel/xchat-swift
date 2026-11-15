@@ -38,9 +38,22 @@ extension XChatCore {
   private struct FeatureFlag: Decodable {
     var isEnabled: Bool
 
+    /// Only a JSON boolean can turn a switch on. Any other value (null, a
+    /// number, a string, an array, an object) reads off rather than failing:
+    /// throwing would reject the whole answer, so one member the server
+    /// changes would keep every other switch from applying. Other decoding
+    /// failures still throw.
     init(from decoder: any Decoder) throws {
       let value = try decoder.singleValueContainer()
-      isEnabled = (try? value.decode(Bool.self)) == true
+      if value.decodeNil() {
+        isEnabled = false
+        return
+      }
+      do {
+        isEnabled = try value.decode(Bool.self)
+      } catch DecodingError.typeMismatch {
+        isEnabled = false
+      }
     }
   }
 }
