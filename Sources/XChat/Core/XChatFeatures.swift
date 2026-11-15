@@ -30,8 +30,7 @@ extension XChatCore {
   /// accepts some values that strict JSON does not: for example (seen on
   /// macOS 27.2), a number such as `01` or a string with an escape such as
   /// `\q`, as a `features` member's value (which reads off) or as another
-  /// top-level member's value (which is ignored). When two members have the
-  /// same name, which JSON allows but leaves undefined, the first counts.
+  /// top-level member's value (which is ignored).
   static func parseFeatures(_ body: [UInt8]) -> Set<String>? {
     guard let response = try? JSONDecoder().decode(FeatureResponse.self, from: Data(body))
     else { return nil }
@@ -56,8 +55,8 @@ extension XChatCore {
     /// `valueNotFound` for it, and the JSON decoder added in
     /// swiftlang/swift-foundation#2263 (not in 6.4.x) throws that (Foundation
     /// in Swift 6.4 and on macOS 27.2 reports `typeMismatch`). A failure
-    /// other than a type mismatch still throws (although JSONDecoder reports
-    /// none here): the protocol documents only those two for a value, so any
+    /// other than a type mismatch still throws (although `JSONDecoder`
+    /// reports none here): the protocol documents only those two for a value, so any
     /// other failure means broken data or a broken decoder, and the answer is
     /// rejected like a broken body.
     init(from decoder: any Decoder) throws {
