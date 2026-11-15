@@ -132,9 +132,6 @@ extension XChatError {
     case noContents(MessageRole)
     /// The message event carries no sequence id.
     case noSequenceId(MessageRole)
-    /// The key a reply carries for the message it quotes is not 32 bytes;
-    /// the value is its length.
-    case carriedMessageKeyLength(Int)
     /// A reply does not embed the message it quotes, so that message cannot
     /// be opened through the reply.
     case quotedMessageNotEmbedded
@@ -270,7 +267,7 @@ extension XChatError {
     /// Data follows `=` padding.
     case dataAfterPadding
     /// A byte is not in the alphabet; the value is that byte.
-    case invalidCharacter(UInt8)
+    case invalidByte(UInt8)
     /// The length, padding included, is not a base64 length; the value is
     /// that length.
     case invalidLength(Int)
@@ -282,7 +279,7 @@ extension XChatError {
     case oddLength(Int)
     /// A byte is not a hex digit; the value is that byte. The rest of the
     /// input is not kept, since it may be a key.
-    case invalidCharacter(UInt8)
+    case invalidByte(UInt8)
   }
 
   /// Why a Thrift binary-protocol encoding is malformed. Sizes, counts and
@@ -355,13 +352,15 @@ extension XChatError {
     /// The contents are shorter than a nonce and tag, so they are no
     /// encrypted contents.
     case ciphertextTooShort
-    /// The key is not 32 bytes; the value is its length. Only a message
-    /// encrypted under its conversation key itself reports this: a
-    /// per-message key is derived to 32 bytes from a key of any length,
-    /// and then fails to authenticate. The key a sending call sends under
-    /// is checked before any message is opened, as
-    /// `InputFailure.conversationKeyLength`, so this is about a key given
-    /// for opening received messages.
+    /// The key is not 32 bytes; the value is its length. The key is one
+    /// the contents are opened with as it is: a conversation key given for
+    /// opening received messages, for a message encrypted under it
+    /// directly, or the per-message key a reply carries for the message it
+    /// quotes (`ContentsKey.carriedByReply`). A per-message key derived
+    /// from a conversation key is 32 bytes whatever that key's length, and
+    /// fails to authenticate instead. The key a sending call sends under is
+    /// checked before any message is opened, as
+    /// `InputFailure.conversationKeyLength`.
     case keyLength(Int)
   }
 
@@ -412,7 +411,8 @@ extension XChatError {
     /// version its signature names; or the payload the signature covers
     /// cannot be rebuilt from the event: the event lacks a field the payload
     /// signs (its message id or sender id; for a key change, also its
-    /// conversation-key version, and before signature version 6 its
+    /// conversation-key version, or has one that is not an integer, which
+    /// the payload signs as an integer; and before signature version 6 its
     /// participants' keys, or from version 6 on the plaintext conversation
     /// key, which this device could not decrypt and no key was given for),
     /// or a field contains a comma, which the comma-joined payload cannot

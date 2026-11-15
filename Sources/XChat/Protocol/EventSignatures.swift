@@ -41,7 +41,8 @@ enum EventSignatureCheck: Sendable, Equatable {
   case verified
   /// There was nothing to check: no signature, no key at that version, or
   /// no payload rebuilt from the event, because its type has no layout, it
-  /// lacks a field the layout signs, or a field contains a comma.
+  /// lacks a field the layout signs, a key change's conversation-key
+  /// version is not an integer, or a field contains a comma.
   case unverifiable
   /// A signature is present but cannot be accepted, for the given reason.
   case failed(XChatError.SignatureFailure)
@@ -111,7 +112,8 @@ private func componentPayloadForDetail(
 
   case .conversationKeyChange(let change):
     // The key version signs as its integer value; a key change without
-    // one has no payload.
+    // one, or with one that is not an integer, has no payload. (A message
+    // signs a version that is not an integer as "null" instead.)
     guard let versionString = change.conversationKeyVersion,
       let keyVersion = Int64(versionString)
     else { return nil }

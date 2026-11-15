@@ -33,8 +33,9 @@ extension XChatCore {
 
   /// Decrypts a received media file: the message's event names it by its
   /// media hash key, and the SDK derives the key from the message's
-  /// conversation key or per-message key. Decryption errors carry the
-  /// media hash key.
+  /// conversation key or per-message key. Errors from decrypting the
+  /// file's bytes (`DecryptionFailure.file`) carry the media hash key;
+  /// errors from resolving its key do not.
   public func decryptFile(
     _ encrypted: [UInt8],
     eventB64: String,
@@ -49,7 +50,8 @@ extension XChatCore {
   }
 
   /// An incremental decryptor for a received media file; the key is
-  /// resolved like `decryptFile`.
+  /// resolved, and the file's errors carry its media hash key, as in
+  /// `decryptFile`.
   public func fileDecryptor(
     eventB64: String,
     conversationKeys: [String: [UInt8]],
@@ -201,9 +203,8 @@ extension XChatCore {
       }
       source = .conversationKey(version: version)
     } else if let carried {
-      guard carried.count == 32 else {
-        throw XChatError.invalidInput(.carriedMessageKeyLength(carried.count))
-      }
+      // A carried key of the wrong length fails to decrypt the contents
+      // below, as a conversation key given directly does.
       keys = .message(key: carried, messageId: try requireMessageId(event, role))
       source = .carriedByReply(version: version)
     } else {

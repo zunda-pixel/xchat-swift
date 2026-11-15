@@ -136,9 +136,6 @@ extension XChatError.InputFailure {
       "\(role.noun) has no contents"
     case .noSequenceId(let role):
       "\(role.noun) carries no sequence_id"
-    case .carriedMessageKeyLength(let length):
-      "the key the reply carries for the quoted message is \(length) bytes, not 32: "
-        + "pass the quoted message's own event"
     case .quotedMessageNotEmbedded:
       "the reply does not embed the message it quotes, so that message can't be opened "
         + "through the reply: pass the quoted message's own event"
@@ -234,7 +231,7 @@ extension XChatError.Base64Failure {
   var explanation: String {
     switch self {
     case .dataAfterPadding: "Invalid base64: '=' is followed by data"
-    case .invalidCharacter(let byte): "Invalid base64 byte: \(describeByte(byte))"
+    case .invalidByte(let byte): "Invalid base64 byte: \(describeByte(byte))"
     case .invalidLength(let length): "Invalid base64 length: \(length)"
     }
   }
@@ -244,7 +241,7 @@ extension XChatError.HexFailure {
   var explanation: String {
     switch self {
     case .oddLength(let length): "Invalid hex length: \(length)"
-    case .invalidCharacter(let byte): "Invalid hex byte: \(describeByte(byte))"
+    case .invalidByte(let byte): "Invalid hex byte: \(describeByte(byte))"
     }
   }
 }

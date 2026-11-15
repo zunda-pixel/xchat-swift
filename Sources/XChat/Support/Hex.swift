@@ -35,7 +35,7 @@ public enum Hex {
     case UInt8(ascii: "0")...UInt8(ascii: "9"): c - UInt8(ascii: "0")
     case UInt8(ascii: "a")...UInt8(ascii: "f"): c - UInt8(ascii: "a") + 10
     case UInt8(ascii: "A")...UInt8(ascii: "F"): c - UInt8(ascii: "A") + 10
-    default: throw XChatError.parse(.hex(.invalidCharacter(c)))
+    default: throw XChatError.parse(.hex(.invalidByte(c)))
     }
   }
 }

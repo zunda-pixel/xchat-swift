@@ -85,7 +85,7 @@ public enum Base64 {
         throw XChatError.parse(.base64(.dataAfterPadding))
       }
       if c >= 128 || table[Int(c)] == 0xFF {
-        throw XChatError.parse(.base64(.invalidCharacter(c)))
+        throw XChatError.parse(.base64(.invalidByte(c)))
       }
       chars.append(c)
     }

@@ -289,7 +289,8 @@ final class FilesAndKeysTests: XCTestCase {
 
   /// Opening media a reply quotes, a key that does not open the quoted
   /// message is reported for the quoted message: the conversation key given
-  /// for its version, or, when none was given, the key the reply carries.
+  /// for its version, or, when none was given, the key the reply carries,
+  /// whether it is the wrong key or not 32 bytes.
   func testKeyThatDoesNotOpenTheQuotedMessageNamesIt() throws {
     let core = XChatCore()
     let quotedVersion = TestVectors.string("message_key_conversation_key_version")
@@ -328,6 +329,21 @@ final class FilesAndKeysTests: XCTestCase {
           .messageContents(
             .quotedMessage, .authenticationFailed,
             key: .carriedByReply(version: quotedVersion))))
+    }
+
+    let shortCarriedKey = try rewritingReply(reply.eventB64, keys: reply.keys) {
+      $0.replyingToPreview?.rawEventMessageKey = [UInt8](repeating: 1, count: 31)
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        encrypted, eventB64: shortCarriedKey, conversationKeys: reply.keys,
+        mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(
+            .quotedMessage, .keyLength(31), key: .carriedByReply(version: quotedVersion))))
     }
   }
 
@@ -461,24 +477,13 @@ final class FilesAndKeysTests: XCTestCase {
   }
 
   /// Without the quoted message's conversation key, its media opens only
-  /// through what the reply embeds: the quoted event, and a 32-byte key
-  /// for it.
+  /// through the quoted event the reply embeds.
   func testQuotedMediaNeedsWhatTheReplyEmbeds() throws {
     let core = XChatCore()
     let mediaHashKey = TestVectors.string("media_first_hash_key")
     let reply = try reply(
       quoting: TestVectors.string("event_message_key_b64"),
       quotedKeys: try Self.messageKeyMap())
-
-    let shortCarriedKey = try rewritingReply(reply.eventB64, keys: reply.keys) {
-      $0.replyingToPreview?.rawEventMessageKey = [UInt8](repeating: 1, count: 31)
-    }
-    XCTAssertThrowsError(
-      try core.decryptFile(
-        [], eventB64: shortCarriedKey, conversationKeys: reply.keys, mediaHashKey: mediaHashKey)
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .invalidInput(.carriedMessageKeyLength(31)))
-    }
 
     let notEmbedded = try rewritingReply(reply.eventB64, keys: reply.keys) {
       $0.replyingToPreview?.rawEventMessageCreate = nil
@@ -894,9 +899,14 @@ final class FilesAndKeysTests: XCTestCase {
       registration.publicKeyFingerprint,
       Base64.encodeURLSafe(sha256(identitySPKI)))
 
-    // The loaded keys are the registration's keys in SEC1 form.
+    // The loaded keys are the registration's keys in SEC1 form. A receiver
+    // checks the binding over the SPKI it rebuilds from the SEC1 signing
+    // key (`verifiedSigningKeys`), so that SPKI is the one registered.
     let identitySEC1 = try core.identityPublicKey()
     XCTAssertEqual(try spkiDER(publicKey: identitySEC1), identitySPKI)
+    XCTAssertEqual(
+      try spkiDER(publicKey: try XCTUnwrap(core.signingPublicKey())), signingSPKI)
+    XCTAssertEqual(try core.getPublicKeyFingerprint(), registration.publicKeyFingerprint)
     let publicKeys = try core.getPublicKeys()
     XCTAssertEqual(
       try Base64.decodeStandard(publicKeys.identity), identitySEC1)

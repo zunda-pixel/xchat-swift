@@ -151,7 +151,7 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
 /// A byte that is not a hex digit is reported alone: the rest of the input
 /// may be a key, so the error does not keep it.
 @Test func hexFailureKeepsOnlyTheInvalidByte() {
-  #expect(throws: XChatError.parse(.hex(.invalidCharacter(UInt8(ascii: "g"))))) {
+  #expect(throws: XChatError.parse(.hex(.invalidByte(UInt8(ascii: "g"))))) {
     try Hex.decode("00ff0g")
   }
 }
@@ -162,11 +162,11 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
 /// written into the text.
 @Test func invalidBytesAreDescribedAsHex() {
   #expect(
-    XChatError.parse(.base64(.invalidCharacter(UInt8(ascii: "!")))).description
+    XChatError.parse(.base64(.invalidByte(UInt8(ascii: "!")))).description
       == "Invalid base64 byte: '!' (0x21)")
   #expect(
-    XChatError.parse(.base64(.invalidCharacter(0xC3))).description == "Invalid base64 byte: 0xC3")
-  #expect(XChatError.parse(.hex(.invalidCharacter(0x0A))).description == "Invalid hex byte: 0x0A")
+    XChatError.parse(.base64(.invalidByte(0xC3))).description == "Invalid base64 byte: 0xC3")
+  #expect(XChatError.parse(.hex(.invalidByte(0x0A))).description == "Invalid hex byte: 0x0A")
 }
 
 /// Hex of an odd length reports that length.

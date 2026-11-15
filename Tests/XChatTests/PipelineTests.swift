@@ -182,7 +182,7 @@ final class PipelineTests: XCTestCase {
     ) { error in
       XCTAssertEqual(
         error as? XChatError,
-        .parse(.event(.base64(.invalidCharacter(UInt8(ascii: "!"))))))
+        .parse(.event(.base64(.invalidByte(UInt8(ascii: "!"))))))
     }
   }
 
@@ -406,7 +406,7 @@ final class PipelineTests: XCTestCase {
       signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
 
     XCTAssertEqual(
-      result.errors, [2: .parse(.event(.base64(.invalidCharacter(UInt8(ascii: "!")))))])
+      result.errors, [2: .parse(.event(.base64(.invalidByte(UInt8(ascii: "!")))))])
     XCTAssertEqual(
       result.conversationKeys.keys["1001"],
       TestVectors.bytes("conversation_key_b64"))
@@ -477,6 +477,25 @@ final class PipelineTests: XCTestCase {
     XCTAssertTrue(batch.errors.isEmpty)
     XCTAssertEqual(batch.conversationKeys.keys, keys)
     XCTAssertNil(batch.conversationKeys.latestVersion)
+  }
+
+  /// A key change signs its conversation-key version as an integer, so a
+  /// version that is not one leaves no payload to check: the event is
+  /// unverifiable, not a mismatch, though its signing key and conversation
+  /// key are given.
+  func testKeyChangeWhoseVersionIsNotAnIntegerIsUnverifiable() throws {
+    let encoded = try rewritingEvent(TestVectors.string("event_key_change_b64")) { event in
+      guard case .conversationKeyChange(var change)? = event.detail else { return }
+      change.conversationKeyVersion = "v1001"
+      event.detail = .conversationKeyChange(change)
+    }
+    XCTAssertThrowsError(
+      try XChatCore().decryptEvent(
+        encoded, conversationKeys: ["v1001": TestVectors.bytes("conversation_key_b64")],
+        signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.keyChange)))
+    }
   }
 
   /// An older, validly signed key change cannot lower the reported latest

@@ -152,7 +152,8 @@ public struct FileDecryptor {
   }
 
   /// Creates a decryptor for the media file named by `mediaHashKey`, under
-  /// its 32-byte key, whose decryption errors carry that media hash key.
+  /// its 32-byte key. Its errors for the file's bytes
+  /// (`DecryptionFailure.file`) carry that media hash key.
   public init(key: [UInt8], mediaHashKey: String) throws {
     guard key.count == 32 else {
       throw XChatError.invalidInput(.fileKeyLength(key.count))
@@ -307,7 +308,8 @@ func decryptFile(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8] {
 }
 
 /// Decrypts the whole encrypted media file named by `mediaHashKey`; its
-/// decryption errors carry that media hash key.
+/// errors for the file's bytes (`DecryptionFailure.file`) carry that media
+/// hash key.
 func decryptMedia(key: [UInt8], mediaHashKey: String, encrypted: [UInt8]) throws -> [UInt8] {
   var decryptor = try FileDecryptor(key: key, mediaHashKey: mediaHashKey)
   var out: [UInt8] = []

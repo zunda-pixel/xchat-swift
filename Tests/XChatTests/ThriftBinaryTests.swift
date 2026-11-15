@@ -333,7 +333,7 @@ final class ThriftBinaryTests: XCTestCase {
       try Base64.decodeStandard(TestVectors.string("event_garbage_b64"))
     ) { error in
       XCTAssertEqual(
-        error as? XChatError, .parse(.base64(.invalidCharacter(UInt8(ascii: "!")))))
+        error as? XChatError, .parse(.base64(.invalidByte(UInt8(ascii: "!")))))
     }
 
     var reader = ThriftReader([0x9E, 0x8B, 0x5A, 0x9D, 0xEB, 0xDE, 0x9E])
