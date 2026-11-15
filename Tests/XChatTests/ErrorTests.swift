@@ -98,6 +98,24 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
       + "given for it; keys were given for versions 1")
 }
 
+/// An unverifiable event is described with every reason its signature goes
+/// unchecked, including a given key whose identity binding does not
+/// verify; only a message is unverifiable for being unencrypted.
+@Test func unverifiableNamesWhyTheSignatureWentUnchecked() {
+  #expect(
+    XChatError.verification(.unverifiable(.message)).description
+      == "Message signature could not be verified: the message is not encrypted (which is "
+      + "never verified), the event carries no signature, no signing key of its sender was "
+      + "given at its key version (a key given with an identity-key binding that does not "
+      + "verify is not used), or the signed payload cannot be rebuilt from the event")
+  #expect(
+    XChatError.verification(.unverifiable(.keyChange)).description
+      == "KeyChange signature could not be verified: the event carries no signature, no "
+      + "signing key of its sender was given at its key version (a key given with an "
+      + "identity-key binding that does not verify is not used), or the signed payload "
+      + "cannot be rebuilt from the event")
+}
+
 /// A message's contents that do not decrypt are described with the message
 /// and the key they were opened with.
 @Test func contentsFailuresNameTheMessageAndKey() {

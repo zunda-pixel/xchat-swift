@@ -394,15 +394,28 @@ extension XChatError {
   /// Why a signature did not verify.
   public enum VerificationFailure: Sendable, Hashable {
     /// An event's signature could not be checked, and unverified events are
-    /// rejected. The event carries no signature (an unencrypted message
-    /// never does), no signing key was given at its key version, or the
-    /// payload the signature covers cannot be rebuilt from the event: the
-    /// event lacks a field the payload signs (its message id or sender id;
-    /// for a key change, also its conversation-key version, and before
-    /// signature version 6 its participants' keys, or from version 6 on the
-    /// plaintext conversation key, which this device could not decrypt and
-    /// no key was given for), or a field contains a comma, which the
-    /// comma-joined payload cannot hold unambiguously.
+    /// rejected. The event is an unencrypted message, which is never
+    /// verified, whether or not it carries a signature; or it carries no
+    /// signature; or no signing key of its sender was given at the key
+    /// version its signature names; or the payload the signature covers
+    /// cannot be rebuilt from the event: the event lacks a field the payload
+    /// signs (its message id or sender id; for a key change, also its
+    /// conversation-key version, and before signature version 6 its
+    /// participants' keys, or from version 6 on the plaintext conversation
+    /// key, which this device could not decrypt and no key was given for),
+    /// or a field contains a comma, which the comma-joined payload cannot
+    /// hold unambiguously.
+    ///
+    /// A signing key given with an identity-key binding (any of
+    /// `SigningKeyEntry`'s `identityPublicKey`, `identityPublicKeySignature`
+    /// and `signingPublicKeySignature` set) is used only when the binding
+    /// verifies: `signingPublicKeySignature` is the identity key's signature
+    /// over the signing key. A key whose binding does not verify (the
+    /// signature does not match, `identityPublicKey` or
+    /// `signingPublicKeySignature` is missing, or a key or the signature
+    /// does not decode) is not used, so when it is the only key at the
+    /// event's key version, the event is unverifiable as if no key had been
+    /// given. Such a binding may mean the key is not the sender's.
     case unverifiable(SignedEvent)
     /// An event's signature was checked and does not hold.
     case rejected(SignedEvent, SignatureFailure)

@@ -536,6 +536,42 @@ final class PipelineTests: XCTestCase {
 
   // MARK: Key bindings
 
+  /// An unencrypted message is unverifiable even when its signature holds
+  /// under the sender's key: it is rejected by default, and marked
+  /// unverified with the policy off.
+  func testUnencryptedMessageIsNeverVerified() throws {
+    var event = try XChatCore().parseEvent(TestVectors.string("event_unencrypted_b64"))
+    let detail = try XCTUnwrap(event.detail)
+    let senderId = try XCTUnwrap(event.senderId)
+    let keyVersion = TestVectors.string("event_signing_key_version")
+    event.messageEventSignature =
+      try signEventSignature(
+        signingPrivateKey: TestVectors.bytes("signing_private_b64"),
+        publicKeyVersion: keyVersion, messageId: try XCTUnwrap(event.messageId),
+        senderId: senderId, conversationId: event.conversationId,
+        signatureVersion: currentSignatureVersion, detail: detail
+      ).signature
+    XCTAssertEqual(
+      checkEventSignature(
+        event: event, detail: detail,
+        signingKeys: [
+          SigningKey(
+            publicKeyVersion: keyVersion, publicKey: TestVectors.string("signing_public_b64"))
+        ]),
+      .verified)
+
+    let signed = encodeEvent(event)
+    XCTAssertThrowsError(
+      try XChatCore().decryptEvent(signed, signingKeys: [signingKey(userId: senderId)])
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
+    }
+    let message = try message(
+      XChatCore(rejectUnverified: false).decryptEvent(
+        signed, signingKeys: [signingKey(userId: senderId)]))
+    XCTAssertFalse(message.verified)
+  }
+
   /// A signing key whose identity binding does not verify is dropped, so it
   /// cannot verify events; a valid binding verifies.
   func testSigningKeyBindingFiltering() throws {
@@ -576,6 +612,19 @@ final class PipelineTests: XCTestCase {
         identityPublicKey: identityB64,
         signingPublicKeySignature: Base64.encodeStandard(
           try sign(privateKey: signingPrivate, payload: signingSPKI))),
+      // The right signature without the identity key it is checked under.
+      SigningKeyEntry(
+        userId: senderId,
+        publicKeyVersion: TestVectors.string("event_signing_key_version"),
+        publicKey: TestVectors.string("signing_public_b64"),
+        signingPublicKeySignature: Base64.encodeStandard(goodSignature)),
+      // A signature that is not base64.
+      SigningKeyEntry(
+        userId: senderId,
+        publicKeyVersion: TestVectors.string("event_signing_key_version"),
+        publicKey: TestVectors.string("signing_public_b64"),
+        identityPublicKey: identityB64,
+        signingPublicKeySignature: "not base64!"),
     ]
     for key in unauthorized {
       XCTAssertThrowsError(

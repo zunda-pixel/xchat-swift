@@ -373,9 +373,11 @@ extension XChatError.VerificationFailure {
   var explanation: String {
     switch self {
     case .unverifiable(let event):
-      "\(event.name) signature could not be verified: the event carries no signature, no "
-        + "signing key was given at its key version, or the signed payload cannot be rebuilt "
-        + "from the event"
+      "\(event.name) signature could not be verified: "
+        + (event == .message ? "the message is not encrypted (which is never verified), " : "")
+        + "the event carries no signature, no signing key of its sender was given at its key "
+        + "version (a key given with an identity-key binding that does not verify is not "
+        + "used), or the signed payload cannot be rebuilt from the event"
     case .rejected(let event, let failure):
       "\(event.name) signature verification failed: \(failure.explanation)"
     }
