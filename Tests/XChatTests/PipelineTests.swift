@@ -114,7 +114,7 @@ final class PipelineTests: XCTestCase {
     ) { error in
       XCTAssertEqual(
         error as? XChatError,
-        .parse(.eventBase64(.invalidCharacter(UInt8(ascii: "!")))))
+        .parse(.event(.base64(.invalidCharacter(UInt8(ascii: "!"))))))
     }
   }
 
@@ -131,7 +131,7 @@ final class PipelineTests: XCTestCase {
       signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
 
     XCTAssertEqual(
-      result.errors, [2: .parse(.eventBase64(.invalidCharacter(UInt8(ascii: "!"))))])
+      result.errors, [2: .parse(.event(.base64(.invalidCharacter(UInt8(ascii: "!")))))])
     XCTAssertEqual(
       result.conversationKeys.keys["1001"],
       TestVectors.bytes("conversation_key_b64"))

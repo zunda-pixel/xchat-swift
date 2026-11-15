@@ -29,3 +29,22 @@ import XChat
 func kindsUseTheBindingsNames(error: XChatError, kind: String) {
   #expect(error.kind.rawValue == kind)
 }
+
+/// A byte that is not a hex digit is reported alone: the rest of the input
+/// may be a key, so the error does not keep it.
+@Test func hexFailureKeepsOnlyTheInvalidByte() {
+  #expect(throws: XChatError.parse(.hex(.invalidCharacter(UInt8(ascii: "g"))))) {
+    try Hex.decode("00ff0g")
+  }
+}
+
+/// Errors are Hashable, so a caller can collect the distinct failures of a
+/// batch.
+@Test func errorsAreHashable() {
+  let errors: Set<XChatError> = [
+    .invalidState(.keysNotLoaded),
+    .invalidState(.keysNotLoaded),
+    .parse(.event(.thrift(.fieldType(field: "id", id: 1, actual: .binary, expected: .i64)))),
+  ]
+  #expect(errors.count == 2)
+}

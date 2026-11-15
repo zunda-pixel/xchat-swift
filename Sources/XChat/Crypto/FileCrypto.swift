@@ -168,7 +168,7 @@ public struct FileDecryptor {
     finished = false
   }
 
-  private func fault(_ fault: XChatError.FileFault) -> XChatError {
+  private func fault(_ fault: XChatError.FileFailure) -> XChatError {
     XChatError.decryption(.file(fault, mediaHashKey: mediaHashKey))
   }
 

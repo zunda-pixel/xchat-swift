@@ -1,26 +1,35 @@
 import Foundation
 
-/// Thrift binary-protocol field types, with the byte values the wire uses.
-///
-/// Booleans are `0x02` in a field header followed by a separate value byte;
-/// only the compact protocol folds the value into the type. Unknown type
-/// bytes are rejected rather than skipped. Parse errors name these types.
-public enum ThriftType: UInt8, Sendable {
-  case stop = 0x00
-  case void = 0x01
-  case bool = 0x02
-  case byte = 0x03
-  case double = 0x04
-  case i16 = 0x06
-  case i32 = 0x08
-  case i64 = 0x0a
-  case binary = 0x0b
-  case structure = 0x0c
-  case map = 0x0d
-  case set = 0x0e
-  case list = 0x0f
-  case uuid = 0x10
+extension XChatError {
+  /// Thrift binary-protocol field types, with the byte values the wire
+  /// uses. Parse errors name these types.
+  ///
+  /// Booleans are `0x02` in a field header followed by a separate value
+  /// byte; only the compact protocol folds the value into the type. Unknown
+  /// type bytes are rejected rather than skipped.
+  public enum ThriftType: UInt8, Sendable, Hashable {
+    case stop = 0x00
+    case void = 0x01
+    case bool = 0x02
+    case byte = 0x03
+    case double = 0x04
+    case i16 = 0x06
+    case i32 = 0x08
+    case i64 = 0x0a
+    case binary = 0x0b
+    case structure = 0x0c
+    case map = 0x0d
+    case set = 0x0e
+    case list = 0x0f
+    case uuid = 0x10
+  }
+}
 
+/// The Thrift code names wire types without the `XChatError.` prefix; the
+/// type is nested there because only parse errors expose it.
+typealias ThriftType = XChatError.ThriftType
+
+extension ThriftType {
   init(wire: UInt8) throws {
     guard let type = ThriftType(rawValue: wire) else {
       throw ThriftError(.unknownType(wire))

@@ -441,9 +441,9 @@ public final class XChatCore {
     do {
       bytes = try Base64.decodeStandard(eventB64)
     } catch XChatError.parse(.base64(let failure)) {
-      throw XChatError.parse(.eventBase64(failure))
+      throw XChatError.parse(.event(.base64(failure)))
     }
-    return try readThrift(bytes, as: XChatError.ParseFailure.event, MessageEvent.read)
+    return try readThrift(bytes, as: { .event(.thrift($0)) }, MessageEvent.read)
   }
 }
 

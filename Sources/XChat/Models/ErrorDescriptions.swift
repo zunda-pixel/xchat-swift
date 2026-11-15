@@ -18,7 +18,7 @@ extension XChatError: LocalizedError, CustomStringConvertible {
   }
 }
 
-extension XChatError.InvalidInput: CustomStringConvertible {
+extension XChatError.InputFailure: CustomStringConvertible {
   public var description: String {
     switch self {
     case .conversationKeyLength(let length):
@@ -110,7 +110,7 @@ extension XChatError.InvalidInput: CustomStringConvertible {
   }
 }
 
-extension XChatError.InvalidAttachment: CustomStringConvertible {
+extension XChatError.AttachmentFailure: CustomStringConvertible {
   public var description: String {
     switch self {
     case .emptyMediaHashKey: "media_hash_key must not be empty"
@@ -140,7 +140,7 @@ extension XChatError.MessageRole: CustomStringConvertible {
   }
 }
 
-extension XChatError.InvalidState: CustomStringConvertible {
+extension XChatError.StateFailure: CustomStringConvertible {
   public var description: String {
     switch self {
     case .keysNotLoaded: "keys are not loaded: import keys first"
@@ -154,8 +154,8 @@ extension XChatError.ParseFailure: CustomStringConvertible {
     switch self {
     case .base64(let failure): failure.description
     case .hex(let failure): failure.description
-    case .eventBase64(let failure): "Invalid base64 event: \(failure)"
-    case .event(let failure): "Thrift parse error: \(failure)"
+    case .event(.base64(let failure)): "Invalid base64 event: \(failure)"
+    case .event(.thrift(let failure)): "Thrift parse error: \(failure)"
     case .messageContents(let failure): "Content parse error: \(failure)"
     }
   }
@@ -175,7 +175,7 @@ extension XChatError.HexFailure: CustomStringConvertible {
   public var description: String {
     switch self {
     case .oddLength(let length): "Invalid hex length: \(length)"
-    case .invalidCharacter(let input): "Invalid hex character in: \(input)"
+    case .invalidCharacter(let byte): "Invalid hex character: \(Unicode.Scalar(byte))"
     }
   }
 }
@@ -238,7 +238,7 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
     }
   }
 
-  private static func describe(_ fault: XChatError.FileFault) -> String {
+  private static func describe(_ fault: XChatError.FileFailure) -> String {
     switch fault {
     case .authenticationFailed:
       "the bytes are not a file encrypted under this key, or they are corrupted: pass "
@@ -253,7 +253,7 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
     }
   }
 
-  private static func describe(_ fault: XChatError.FileFault, mediaHashKey: String) -> String {
+  private static func describe(_ fault: XChatError.FileFailure, mediaHashKey: String) -> String {
     switch fault {
     case .authenticationFailed:
       "the bytes are not the encrypted file of media_hash_key '\(mediaHashKey)', or they "
@@ -272,7 +272,7 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
   }
 }
 
-extension XChatError.FileFault: CustomStringConvertible {
+extension XChatError.FileFailure: CustomStringConvertible {
   public var description: String {
     XChatError.DecryptionFailure.file(self, mediaHashKey: nil).description
   }
@@ -301,7 +301,7 @@ extension XChatError.SignedEvent: CustomStringConvertible {
   }
 }
 
-extension XChatError.SignatureRejection: CustomStringConvertible {
+extension XChatError.SignatureFailure: CustomStringConvertible {
   public var description: String {
     switch self {
     case .missingSignatureVersion:
@@ -310,8 +310,8 @@ extension XChatError.SignatureRejection: CustomStringConvertible {
       "signature_version \(version) is no longer accepted (minimum: \(minimum))"
     case .signatureVersionUnsupported(let version, let maximum):
       "signature_version \(version) is not supported (maximum: \(maximum))"
-    case .mismatch(let keyVersion, let payloadLength):
-      "ECDSA mismatch: key_version=\(keyVersion), payload_len=\(payloadLength)"
+    case .mismatch(let keyVersion):
+      "ECDSA mismatch: key_version=\(keyVersion)"
     case .malformedSignature:
       "the signature is not a 64-byte ECDSA P-256 signature"
     case .invalidSigningPublicKey:
@@ -335,8 +335,8 @@ extension XChatError.InternalFailure: CustomStringConvertible {
       "Secretbox encryption failed"
     case .invalidSigningPrivateKey:
       "Invalid signing key: not a P-256 private key"
-    case .unexpected:
-      "an error that is not an XChatError was raised inside the SDK"
+    case .unexpected(let description):
+      "an error that is not an XChatError was raised inside the SDK: \(description)"
     }
   }
 }

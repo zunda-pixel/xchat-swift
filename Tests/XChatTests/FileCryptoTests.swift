@@ -28,7 +28,7 @@ final class FileCryptoTests: XCTestCase {
   /// Asserts the closure throws `fault` for a file under a key the caller
   /// holds.
   private func assertThrows<T>(
-    _ fault: XChatError.FileFault,
+    _ fault: XChatError.FileFailure,
     _ message: @autoclosure () -> String = "",
     file: StaticString = #filePath,
     line: UInt = #line,
@@ -213,7 +213,7 @@ final class FileCryptoTests: XCTestCase {
   /// The last frame's failure is its own case, since it may also be cut
   /// short.
   func testTamperedFrameRejected() throws {
-    let faults: [(index: Int, fault: XChatError.FileFault)] = [
+    let faults: [(index: Int, fault: XChatError.FileFailure)] = [
       (24, .authenticationFailed),
       (100, .authenticationFailed),
       (1064, .authenticationFailed),

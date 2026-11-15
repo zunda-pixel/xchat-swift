@@ -43,7 +43,7 @@ enum EventSignatureCheck: Sendable, Equatable {
   /// no payload layout for the event type.
   case unverifiable
   /// A signature is present but cannot be accepted, for the given reason.
-  case failed(XChatError.SignatureRejection)
+  case failed(XChatError.SignatureFailure)
 }
 
 /// The signature version an event carries, when it is an integer.
@@ -213,7 +213,7 @@ func checkEventSignature(
     {
       return .verified
     }
-    return .failed(.mismatch(keyVersion: keyVersion, payloadLength: payload.utf8.count))
+    return .failed(.mismatch(keyVersion: keyVersion))
   } catch XChatError.verification(.malformedSignature) {
     return .failed(.malformedSignature)
   } catch {

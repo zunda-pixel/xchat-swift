@@ -66,7 +66,7 @@ final class EventSignatureTests: XCTestCase {
       publicKeyVersion: Self.signingKey.publicKeyVersion,
       publicKey: Base64.encodeStandard(generateKeyPair().publicKey))
     guard
-      case .failed(.mismatch(let keyVersion, _)) = checkEventSignature(
+      case .failed(.mismatch(let keyVersion)) = checkEventSignature(
         event: event, detail: try detail(of: event), signingKeys: [otherKey])
     else {
       return XCTFail("expected a signature mismatch")

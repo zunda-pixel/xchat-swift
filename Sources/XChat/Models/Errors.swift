@@ -19,11 +19,15 @@ public enum ErrorKind: String, Sendable {
 /// The single error type every SDK call throws. The case is the kind of
 /// failure, and its value says exactly what went wrong, with the values
 /// involved, so callers tell failures apart by matching cases.
-public enum XChatError: Error, Sendable, Equatable {
+///
+/// Later versions add cases as the SDK learns to tell more failures apart,
+/// at every level of nesting. Match the cases you handle and keep a
+/// `default` for the rest, which `description` describes.
+public enum XChatError: Error, Sendable, Hashable {
   /// A parameter is missing or invalid.
-  case invalidInput(InvalidInput)
+  case invalidInput(InputFailure)
   /// A value was neither passed nor available from the chat's state.
-  case invalidState(InvalidState)
+  case invalidState(StateFailure)
   /// Event or other wire data is malformed.
   case parse(ParseFailure)
   /// Ciphertext did not decrypt, or no key for it was available.
@@ -51,7 +55,7 @@ public enum XChatError: Error, Sendable, Equatable {
 
 extension XChatError {
   /// What about a parameter is invalid.
-  public enum InvalidInput: Sendable, Equatable {
+  public enum InputFailure: Sendable, Hashable {
     // Keys
 
     /// A conversation key is not 32 bytes; the value is its length.
@@ -59,8 +63,6 @@ extension XChatError {
     /// A key passed to `encryptFileWithKey` or `decryptFileWithKey` is not
     /// 32 bytes; the value is its length.
     case fileKeyLength(Int)
-    /// A secretstream header is not 24 bytes; the value is its length.
-    case streamHeaderLength(Int)
     /// A public key is not a P-256 point in compressed SEC1, uncompressed
     /// SEC1, or SPKI DER.
     case publicKey
@@ -73,6 +75,8 @@ extension XChatError {
     /// The ephemeral public key an ECIES ciphertext starts with is not a
     /// P-256 point.
     case ephemeralPublicKey
+    /// A secretstream header is not 24 bytes; the value is its length.
+    case streamHeaderLength(Int)
     /// The loaded keys have no public key version to sign under: import
     /// them with their version, or set it.
     case signingKeyVersionNotSet
@@ -108,7 +112,7 @@ extension XChatError {
     /// An entity's offsets are not a range of the text's UTF-8 bytes.
     case entityRange(start: Int32, end: Int32)
     /// The attachment descriptor at `index` is invalid.
-    case attachment(index: Int, InvalidAttachment)
+    case attachment(index: Int, AttachmentFailure)
     /// The target message's sequence id is empty.
     case emptyTargetSequenceId
     /// The reaction emoji is empty.
@@ -162,7 +166,7 @@ extension XChatError {
   }
 
   /// What about an attachment descriptor is invalid.
-  public enum InvalidAttachment: Sendable, Equatable {
+  public enum AttachmentFailure: Sendable, Hashable {
     /// A media attachment's media hash key is empty.
     case emptyMediaHashKey
     /// A media attachment's width or height is negative.
@@ -195,7 +199,7 @@ extension XChatError {
 
   /// Which message an error is about: the message whose event was passed,
   /// or the message a reply quotes.
-  public enum MessageRole: Sendable, Equatable {
+  public enum MessageRole: Sendable, Hashable {
     case message
     case quotedMessage
   }
@@ -205,7 +209,7 @@ extension XChatError {
 
 extension XChatError {
   /// What the chat's state lacks.
-  public enum InvalidState: Sendable, Equatable {
+  public enum StateFailure: Sendable, Hashable {
     /// No keys are loaded: import keys first.
     case keysNotLoaded
     /// No signing key is loaded.
@@ -217,21 +221,29 @@ extension XChatError {
 
 extension XChatError {
   /// What is malformed, and where.
-  public enum ParseFailure: Sendable, Equatable {
-    /// Base64 does not decode.
+  public enum ParseFailure: Sendable, Hashable {
+    /// Input to `Base64.decodeStandard` or `Base64.decodeURLSafe` does not
+    /// decode.
     case base64(Base64Failure)
-    /// Hex does not decode.
+    /// Input to `Hex.decode` does not decode.
     case hex(HexFailure)
-    /// An event's base64 does not decode.
-    case eventBase64(Base64Failure)
-    /// An event's Thrift encoding is malformed.
-    case event(ThriftFailure)
+    /// An event does not decode.
+    case event(EventFailure)
     /// A message's decrypted contents are malformed Thrift.
     case messageContents(ThriftFailure)
   }
 
+  /// Why an event does not decode: events travel as the base64 of their
+  /// Thrift encoding.
+  public enum EventFailure: Sendable, Hashable {
+    /// The base64 does not decode.
+    case base64(Base64Failure)
+    /// The Thrift encoding is malformed.
+    case thrift(ThriftFailure)
+  }
+
   /// Why base64 does not decode.
-  public enum Base64Failure: Sendable, Equatable {
+  public enum Base64Failure: Sendable, Hashable {
     /// Data follows `=` padding.
     case dataAfterPadding
     /// A byte is not in the alphabet; the value is that byte.
@@ -242,16 +254,16 @@ extension XChatError {
   }
 
   /// Why hex does not decode.
-  public enum HexFailure: Sendable, Equatable {
+  public enum HexFailure: Sendable, Hashable {
     /// The input has an odd number of bytes; the value is that number.
     case oddLength(Int)
-    /// The input has a byte that is not a hex digit; the value is the
-    /// input.
-    case invalidCharacter(in: String)
+    /// A byte is not a hex digit; the value is that byte. The rest of the
+    /// input is not kept, since it may be a key.
+    case invalidCharacter(UInt8)
   }
 
   /// Why a Thrift binary-protocol encoding is malformed.
-  public enum ThriftFailure: Sendable, Equatable {
+  public enum ThriftFailure: Sendable, Hashable {
     /// The input ends inside a value.
     case unexpectedEnd
     /// A type byte names no Thrift type; the value is that byte.
@@ -284,7 +296,7 @@ extension XChatError {
 
 extension XChatError {
   /// Why ciphertext did not decrypt.
-  public enum DecryptionFailure: Sendable, Equatable {
+  public enum DecryptionFailure: Sendable, Hashable {
     /// The ciphertext did not authenticate: it was encrypted under another
     /// key, or it is corrupted. Authenticated encryption cannot tell the
     /// two apart, so one case covers both.
@@ -300,7 +312,7 @@ extension XChatError {
     /// An encrypted file did not decrypt. `mediaHashKey` names the media
     /// when the file was opened as a message's media; it is nil for a file
     /// under a key the caller holds.
-    case file(FileFault, mediaHashKey: String?)
+    case file(FileFailure, mediaHashKey: String?)
     /// A message is encrypted under a conversation-key version no key was
     /// given for. `available` lists the versions there were keys for,
     /// sorted.
@@ -314,7 +326,7 @@ extension XChatError {
   }
 
   /// Why an encrypted file's bytes did not decrypt.
-  public enum FileFault: Sendable, Equatable {
+  public enum FileFailure: Sendable, Hashable {
     /// A frame with more of the file after it did not authenticate: the
     /// bytes are corrupted, or they are another file's (encrypted under
     /// another key). As with `DecryptionFailure.authenticationFailed`, the
@@ -336,7 +348,7 @@ extension XChatError {
 
 extension XChatError {
   /// Why a signature did not verify.
-  public enum VerificationFailure: Sendable, Equatable {
+  public enum VerificationFailure: Sendable, Hashable {
     /// A signature is not a raw 64-byte `r || s` ECDSA P-256 signature.
     case malformedSignature
     /// An event's signature could not be checked: the event carries none,
@@ -344,17 +356,17 @@ extension XChatError {
     /// unverified events are rejected.
     case unverifiable(SignedEvent)
     /// An event's signature was checked and does not hold.
-    case rejected(SignedEvent, SignatureRejection)
+    case rejected(SignedEvent, SignatureFailure)
   }
 
   /// The kind of event whose signature an error is about.
-  public enum SignedEvent: Sendable, Equatable {
+  public enum SignedEvent: Sendable, Hashable {
     case message
     case keyChange
   }
 
   /// Why an event's signature was rejected.
-  public enum SignatureRejection: Sendable, Equatable {
+  public enum SignatureFailure: Sendable, Hashable {
     /// The signature's version is missing or not an integer.
     case missingSignatureVersion
     /// The signature's version is below the lowest one accepted.
@@ -363,7 +375,7 @@ extension XChatError {
     case signatureVersionUnsupported(Int32, maximum: Int32)
     /// The signature does not match the payload rebuilt from the event,
     /// under the signing key at `keyVersion`.
-    case mismatch(keyVersion: String, payloadLength: Int)
+    case mismatch(keyVersion: String)
     /// The signature is not a raw 64-byte `r || s` ECDSA P-256 signature.
     case malformedSignature
     /// The signing key at the event's key version is not a P-256 public
@@ -376,7 +388,7 @@ extension XChatError {
 
 extension XChatError {
   /// What failed inside the SDK.
-  public enum InternalFailure: Sendable, Equatable {
+  public enum InternalFailure: Sendable, Hashable {
     /// HKDF was asked for more output than it can derive.
     case hkdfLengthExceedsMaximum(Int, maximum: Int)
     /// libsodium did not initialize.
@@ -390,16 +402,18 @@ extension XChatError {
     /// The loaded signing key is not a P-256 private key.
     case invalidSigningPrivateKey
     /// An error that is not an `XChatError` reached a result that holds
-    /// only `XChatError`s. Nothing in the SDK is known to raise one.
-    case unexpected
+    /// only `XChatError`s; the value is that error's description. Nothing
+    /// in the SDK is known to raise one.
+    case unexpected(String)
   }
 }
 
 extension XChatError {
-  /// `error` when it is an `XChatError`; otherwise `.unexpected`, for
-  /// results that hold only `XChatError`s. The other error is not kept:
-  /// holding an `any Error` would keep `XChatError` from being `Equatable`.
+  /// `error` when it is an `XChatError`; otherwise `.unexpected` with the
+  /// other error's description, for results that hold only `XChatError`s.
+  /// The other error itself is not kept: holding an `any Error` would keep
+  /// `XChatError` from being `Hashable`.
   init(_ error: any Error) {
-    self = error as? XChatError ?? .internalError(.unexpected)
+    self = error as? XChatError ?? .internalError(.unexpected(String(describing: error)))
   }
 }
