@@ -12,13 +12,13 @@ struct SecretStreamPush: Sendable {
 
   static func start(key: [UInt8]) throws -> (header: [UInt8], stream: SecretStreamPush) {
     guard key.count == 32 else {
-      throw XChatError.invalidInput("Conversation key must be 32 bytes")
+      throw XChatError.invalidInput(.conversationKeyLength(key.count))
     }
-    guard sodiumReady else { throw XChatError.internalError("libsodium initialization failed") }
+    guard sodiumReady else { throw XChatError.internalError(.sodiumInitializationFailed) }
     var state = crypto_secretstream_xchacha20poly1305_state()
     var header = [UInt8](repeating: 0, count: 24)
     let status = unsafe crypto_secretstream_xchacha20poly1305_init_push(&state, &header, key)
-    guard status == 0 else { throw XChatError.internalError("Secretstream initialization failed") }
+    guard status == 0 else { throw XChatError.internalError(.streamInitializationFailed) }
     return (header, SecretStreamPush(state: state))
   }
 
@@ -29,7 +29,7 @@ struct SecretStreamPush: Sendable {
     let status = unsafe crypto_secretstream_xchacha20poly1305_push(
       &state, &frame, nil, plaintext, UInt64(plaintext.count),
       associatedData, UInt64(associatedData.count), tag.rawValue)
-    guard status == 0 else { throw XChatError.internalError("Secretstream encryption failed") }
+    guard status == 0 else { throw XChatError.internalError(.streamEncryptionFailed) }
     return frame
   }
 }
@@ -39,21 +39,21 @@ struct SecretStreamPull: Sendable {
 
   init(header: [UInt8], key: [UInt8]) throws {
     guard key.count == 32 else {
-      throw XChatError.invalidInput("Conversation key must be 32 bytes")
+      throw XChatError.invalidInput(.conversationKeyLength(key.count))
     }
     guard header.count == 24 else {
-      throw XChatError.invalidInput("secretstream headers are 24 bytes")
+      throw XChatError.invalidInput(.streamHeaderLength(header.count))
     }
-    guard sodiumReady else { throw XChatError.internalError("libsodium initialization failed") }
+    guard sodiumReady else { throw XChatError.internalError(.sodiumInitializationFailed) }
     state = crypto_secretstream_xchacha20poly1305_state()
     let status = unsafe crypto_secretstream_xchacha20poly1305_init_pull(&state, header, key)
-    guard status == 0 else { throw XChatError.decryption("Secretstream initialization failed") }
+    guard status == 0 else { throw XChatError.decryption(.invalidStreamHeader) }
   }
 
   mutating func pull(
     _ frame: [UInt8], associatedData: [UInt8] = []
   ) throws -> (plaintext: [UInt8], tag: SecretStreamTag) {
-    guard frame.count >= 17 else { throw XChatError.decryption("secretstream pull failed") }
+    guard frame.count >= 17 else { throw XChatError.decryption(.ciphertextTooShort) }
     let count = frame.count - 17
     var plaintext = [UInt8](repeating: 0, count: max(1, count))
     var rawTag: UInt8 = 0
@@ -61,8 +61,9 @@ struct SecretStreamPull: Sendable {
     let status = unsafe crypto_secretstream_xchacha20poly1305_pull(
       &nextState, &plaintext, nil, &rawTag, frame, UInt64(frame.count),
       associatedData, UInt64(associatedData.count))
-    guard status == 0, let tag = SecretStreamTag(rawValue: rawTag) else {
-      throw XChatError.decryption("secretstream pull failed")
+    guard status == 0 else { throw XChatError.decryption(.authenticationFailed) }
+    guard let tag = SecretStreamTag(rawValue: rawTag) else {
+      throw XChatError.decryption(.unknownStreamTag(rawTag))
     }
     state = nextState
     return (Array(plaintext.prefix(count)), tag)

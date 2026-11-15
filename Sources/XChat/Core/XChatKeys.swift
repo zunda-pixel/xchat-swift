@@ -37,10 +37,10 @@ extension XChatCore {
   /// The loaded identity and signing public keys, base64 SEC1.
   public func getPublicKeys() throws -> PublicKeys {
     guard let identityPrivateKey else {
-      throw XChatError.invalidState("keys are not loaded: import keys first")
+      throw XChatError.invalidState(.keysNotLoaded)
     }
     guard let signingPrivateKey else {
-      throw XChatError.invalidState("signing key is not loaded")
+      throw XChatError.invalidState(.signingKeyNotLoaded)
     }
     return PublicKeys(
       identity: Base64.encodeStandardPadded(
@@ -53,7 +53,7 @@ extension XChatCore {
   /// SPKI DER, which users compare out of band.
   public func getPublicKeyFingerprint() throws -> String {
     guard let identityPrivateKey else {
-      throw XChatError.invalidState("keys are not loaded: import keys first")
+      throw XChatError.invalidState(.keysNotLoaded)
     }
     let publicKey = try derivePublicKey(privateKey: identityPrivateKey)
     return fingerprint(spki: try spkiDER(publicKey: publicKey))
@@ -69,9 +69,7 @@ extension XChatCore {
   func validatePublicKeyVersion(_ version: String) throws {
     let canonical = Int64(version).map(String.init)
     guard canonical == version, let number = Int64(version), number >= 0 else {
-      throw XChatError.invalidInput(
-        "Invalid public key version '\(version)': pass the key version as the X API "
-          + "returns it, an integer in digits")
+      throw XChatError.invalidInput(.publicKeyVersion(version))
     }
   }
 

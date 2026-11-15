@@ -266,11 +266,11 @@ public struct DecryptedEvent: Sendable {
 }
 
 /// The batch decryption result: decrypted events, adopted conversation
-/// keys, and per-index error messages for the events left out.
+/// keys, and the error for each event left out, by its index in the batch.
 public struct DecryptEventsResult: Sendable {
   public var events: [DecryptedEvent]
   public var conversationKeys: ConversationKeySet
-  public var errors: [Int: String]
+  public var errors: [Int: XChatError]
 }
 
 /// A signing key the verifier knows, with the optional identity-key binding

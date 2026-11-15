@@ -64,10 +64,7 @@ final class ECIESTests: XCTestCase {
     XCTAssertThrowsError(
       try decryptWithPrivateKey(privateKey: second.privateKey, data: ciphertext)
     ) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, .decryption)
-      XCTAssertEqual(
-        error?.message, "Decryption failed - invalid key or corrupted data")
+      XCTAssertEqual(error as? XChatError, .decryption(.authenticationFailed))
     }
   }
 
@@ -81,7 +78,7 @@ final class ECIESTests: XCTestCase {
     XCTAssertThrowsError(
       try decryptWithPrivateKey(privateKey: pair.privateKey, data: body)
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .decryption)
+      XCTAssertEqual(error as? XChatError, .decryption(.authenticationFailed))
     }
 
     // The authentication tag.
@@ -90,7 +87,7 @@ final class ECIESTests: XCTestCase {
     XCTAssertThrowsError(
       try decryptWithPrivateKey(privateKey: pair.privateKey, data: tag)
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .decryption)
+      XCTAssertEqual(error as? XChatError, .decryption(.authenticationFailed))
     }
 
     // The ephemeral public key prefix.
@@ -99,7 +96,7 @@ final class ECIESTests: XCTestCase {
     XCTAssertThrowsError(
       try decryptWithPrivateKey(privateKey: pair.privateKey, data: prefix)
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(error as? XChatError, .invalidInput(.ephemeralPublicKey))
     }
   }
 
@@ -111,9 +108,7 @@ final class ECIESTests: XCTestCase {
           privateKey: pair.privateKey,
           data: [UInt8](repeating: 0, count: length))
       ) { error in
-        let error = error as? XChatError
-        XCTAssertEqual(error?.kind, .decryption)
-        XCTAssertEqual(error?.message, "Data too short")
+        XCTAssertEqual(error as? XChatError, .decryption(.ciphertextTooShort))
       }
     }
   }
@@ -126,12 +121,12 @@ final class ECIESTests: XCTestCase {
       XCTAssertThrowsError(
         try decryptWithPrivateKey(privateKey: key, data: ciphertext)
       ) { error in
-        XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+        XCTAssertEqual(error as? XChatError, .invalidInput(.privateKey))
       }
     }
     XCTAssertThrowsError(try derivePublicKey(privateKey: [UInt8](repeating: 0, count: 32))) {
       error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(error as? XChatError, .invalidInput(.privateKey))
     }
   }
 
@@ -140,7 +135,7 @@ final class ECIESTests: XCTestCase {
     let offCurve = [0x04] + [UInt8](repeating: 0, count: 64)
     XCTAssertFalse(isValidPublicKey(offCurve))
     XCTAssertThrowsError(try encryptWithPublicKey(publicKey: offCurve, data: [1])) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(error as? XChatError, .invalidInput(.publicKey))
     }
     // Wrong length.
     XCTAssertFalse(isValidPublicKey([UInt8](repeating: 1, count: 32)))
@@ -190,9 +185,7 @@ final class ECIESTests: XCTestCase {
           signature: [UInt8](repeating: 0, count: length),
           payload: [1])
       ) { error in
-        let error = error as? XChatError
-        XCTAssertEqual(error?.kind, .verification)
-        XCTAssertEqual(error?.message, "Invalid signature length")
+        XCTAssertEqual(error as? XChatError, .verification(.malformedSignature))
       }
     }
   }

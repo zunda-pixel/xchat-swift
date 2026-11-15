@@ -21,9 +21,9 @@ final class EventModelTests: XCTestCase {
   }
 
   private func messageCreate(_ event: MessageEvent) throws -> MessageCreateEvent {
-    guard case .messageCreate(let create) = try XCTUnwrap(event.detail) else {
-      XCTFail("expected a message-create detail")
-      throw XChatError.parse("not a message-create detail")
+    let detail = try XCTUnwrap(event.detail)
+    guard case .messageCreate(let create) = detail else {
+      return try XCTUnwrap(nil, "expected a message-create detail, got \(detail)")
     }
     return create
   }

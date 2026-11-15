@@ -87,10 +87,7 @@ final class MessageKeysTests: XCTestCase {
         senderId: "sender-1",
         messageId: "m")
     ) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, .decryption)
-      XCTAssertEqual(
-        error?.message, "message key needs a numeric sender id, got 'sender-1'")
+      XCTAssertEqual(error as? XChatError, .decryption(.nonNumericSenderId("sender-1")))
     }
   }
 

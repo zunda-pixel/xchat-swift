@@ -22,7 +22,7 @@ struct AES128GCM {
   ) throws -> [UInt8] {
     let tagSize = 16
     guard ciphertextAndTag.count >= tagSize else {
-      throw XChatError.decryption("Ciphertext too short")
+      throw XChatError.decryption(.ciphertextTooShort)
     }
     let box = try AES.GCM.SealedBox(
       nonce: AES.GCM.Nonce(data: nonce), ciphertext: ciphertextAndTag.dropLast(tagSize),

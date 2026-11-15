@@ -34,20 +34,21 @@ import XChat
 
   let target = TestVectors.string("event_message_key_b64")
   let conversationId = TestVectors.string("event_conversation_id")
-  let error = #expect(throws: XChatError.self) {
+  #expect(
+    throws: XChatError.decryption(
+      .missingConversationKey(version: oldVersion, available: [newVersion]))
+  ) {
     try core.encryptReply(
       text: "after rotation", replyToEventB64: target, conversationId: conversationId,
       conversationKey: newKey, conversationKeyVersion: newVersion, senderId: sender)
   }
-  #expect(error?.kind == .decryption)
 
-  let wrongConversation = #expect(throws: XChatError.self) {
+  #expect(throws: XChatError.invalidInput(.quotedMessageInOtherConversation)) {
     try core.encryptReply(
       text: "after rotation", replyToEventB64: target, conversationId: "1111:3333",
       conversationKey: newKey, conversationKeyVersion: newVersion, senderId: sender,
       replyToConversationKeys: [oldVersion: oldKey])
   }
-  #expect(wrongConversation?.kind == .invalidInput)
 
   let payload = try core.encryptReply(
     text: "after rotation", replyToEventB64: target, conversationId: conversationId,
@@ -74,10 +75,9 @@ func importingAnInvalidKeyVersionPreservesLoadedKeys(version: String) throws {
   try core.importKeys(
     identityPrivateKey: identity, signingPrivateKey: signing, publicKeyVersion: "1")
 
-  let error = #expect(throws: XChatError.self) {
+  #expect(throws: XChatError.invalidInput(.publicKeyVersion(version))) {
     try core.importKeys(identityPrivateKey: signing, publicKeyVersion: version)
   }
-  #expect(error?.kind == .invalidInput)
   let keys = try core.exportKeys()
   #expect(keys.identity == identity)
   #expect(keys.signing == signing)

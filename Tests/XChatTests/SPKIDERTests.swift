@@ -60,11 +60,15 @@ struct SPKIDERTests {
     var malformed = publicKey
     malformed[0] = 0x31
 
-    for invalidKey in [malformed, wrongCurve, publicKey + [0]] {
-      let error = #expect(throws: XChatError.self) {
+    let cases: [(key: [UInt8], error: XChatError)] = [
+      (malformed, .invalidInput(.publicKey)),
+      (wrongCurve, .invalidInput(.subjectPublicKeyInfo)),
+      (publicKey + [0], .invalidInput(.publicKey)),
+    ]
+    for (invalidKey, expected) in cases {
+      #expect(throws: expected) {
         try verify(publicKey: invalidKey, signature: signature, payload: message)
       }
-      #expect(error?.kind == .invalidInput)
     }
   }
 }

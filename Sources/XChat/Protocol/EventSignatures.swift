@@ -42,8 +42,8 @@ enum EventSignatureCheck: Sendable, Equatable {
   /// There was nothing to check: no signature, no key at that version, or
   /// no payload layout for the event type.
   case unverifiable
-  /// A signature is present but cannot be accepted; the string is why.
-  case failed(String)
+  /// A signature is present but cannot be accepted, for the given reason.
+  case failed(XChatError.SignatureRejection)
 }
 
 /// The signature version an event carries, when it is an integer.
@@ -186,17 +186,13 @@ func checkEventSignature(
   else { return .unverifiable }
 
   guard let version = signatureVersion(of: event) else {
-    return .failed("signature_version is missing or not an integer")
+    return .failed(.missingSignatureVersion)
   }
   guard version >= minimumSignatureVersion else {
-    return .failed(
-      "signature_version \(version) is no longer accepted "
-        + "(minimum: \(minimumSignatureVersion))")
+    return .failed(.signatureVersionTooOld(version, minimum: minimumSignatureVersion))
   }
   guard version <= maximumSignatureVersion else {
-    return .failed(
-      "signature_version \(version) is not supported "
-        + "(maximum: \(maximumSignatureVersion))")
+    return .failed(.signatureVersionUnsupported(version, maximum: maximumSignatureVersion))
   }
 
   let keyVersion = signature.publicKeyVersion ?? ""
@@ -217,11 +213,13 @@ func checkEventSignature(
     {
       return .verified
     }
-    return .failed(
-      "ECDSA mismatch: key_version=\(keyVersion), payload_len=\(payload.utf8.count)")
+    return .failed(.mismatch(keyVersion: keyVersion, payloadLength: payload.utf8.count))
+  } catch XChatError.verification(.malformedSignature) {
+    return .failed(.malformedSignature)
   } catch {
-    let reason = (error as? XChatError)?.message ?? String(describing: error)
-    return .failed("verify error: \(reason)")
+    // Everything else `verify` and the base64 decoding throw is about the
+    // signing key: it is not base64, or not a P-256 public key.
+    return .failed(.invalidSigningPublicKey)
   }
 }
 
@@ -250,7 +248,7 @@ func signEventSignature(
       event: event, detail: detail,
       plaintextConversationKeyB64: plaintextConversationKeyB64)
   else {
-    throw XChatError.invalidInput("Signature payload contains comma-separated component")
+    throw XChatError.invalidInput(.signaturePayloadContainsComma)
   }
 
   let signature = try sign(privateKey: signingPrivateKey, payload: Array(payload.utf8))

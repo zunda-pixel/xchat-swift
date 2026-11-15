@@ -60,9 +60,8 @@ final class HashTests: XCTestCase {
 
   func testHKDFLengthLimit() {
     XCTAssertThrowsError(try hkdf(secret: [1], salt: "s", length: 8161)) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, .internalError)
-      XCTAssertEqual(error?.message, "Requested length 8161 exceeds maximum 8160")
+      XCTAssertEqual(
+        error as? XChatError, .internalError(.hkdfLengthExceedsMaximum(8161, maximum: 8160)))
     }
     XCTAssertNoThrow(try hkdf(secret: [1], salt: "s", length: 8160))
   }

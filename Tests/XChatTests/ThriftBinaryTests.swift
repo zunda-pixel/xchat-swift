@@ -6,6 +6,19 @@ import XCTest
 /// input, skipping unmodelled values, and decoding the cross-binding
 /// vectors' real events.
 final class ThriftBinaryTests: XCTestCase {
+  /// Asserts the reader throws `failure`.
+  private func assertThrows<T>(
+    _ failure: XChatError.ThriftFailure,
+    _ message: @autoclosure () -> String = "",
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ body: () throws -> T
+  ) {
+    XCTAssertThrowsError(try body(), message(), file: file, line: line) { error in
+      XCTAssertEqual((error as? ThriftError)?.failure, failure, file: file, line: line)
+    }
+  }
+
   // MARK: Exact encodings
 
   /// The reference implementation's own expectations for field headers.
@@ -132,49 +145,45 @@ final class ThriftBinaryTests: XCTestCase {
 
   func testUnknownFieldTypeRejected() {
     var reader = ThriftReader([0x05])
-    XCTAssertThrowsError(try reader.readFieldBegin()) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .parse)
-    }
+    assertThrows(.unknownType(0x05)) { try reader.readFieldBegin() }
     var listReader = ThriftReader([0x05, 0x00, 0x00, 0x00, 0x00])
-    XCTAssertThrowsError(try listReader.readListBegin())
+    assertThrows(.unknownType(0x05)) { try listReader.readListBegin() }
   }
 
   func testTruncatedInputRejected() {
     for bytes: [UInt8] in [[], [0x0B], [0x0B, 0x00], [0x06, 0x00]] {
       var reader = ThriftReader(bytes)
-      XCTAssertThrowsError(try reader.readFieldBegin()) { error in
-        XCTAssertEqual((error as? XChatError)?.kind, .parse)
-      }
+      assertThrows(.unexpectedEnd, "\(bytes)") { try reader.readFieldBegin() }
     }
     // A field header can be complete while its value is not.
     var reader = ThriftReader([0x06, 0x00, 0x01])
     _ = try? reader.readFieldBegin()
-    XCTAssertThrowsError(try reader.readI16())
+    assertThrows(.unexpectedEnd) { try reader.readI16() }
     var stringReader = ThriftReader([0x00, 0x00, 0x00, 0x05, 0x61])
-    XCTAssertThrowsError(try stringReader.readString())
+    assertThrows(.unexpectedEnd) { try stringReader.readString() }
     XCTAssertFalse(stringReader.isAtEnd)
   }
 
   func testNegativeAndOversizedLengthsRejected() {
     // Negative string length.
     var negative = ThriftReader([0xFF, 0xFF, 0xFF, 0xFF])
-    XCTAssertThrowsError(try negative.readBinary())
+    assertThrows(.negativeSize(.binary, -1)) { try negative.readBinary() }
 
     // Declared length far above the cap, with no body: rejected before
     // any allocation or read.
     var oversized = ThriftReader([0x07, 0xFF, 0xFF, 0xFF])
-    XCTAssertThrowsError(try oversized.readBinary()) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .parse)
+    assertThrows(.sizeExceedsMaximum(.binary, 0x07FF_FFFF, maximum: 100 * 1024 * 1024)) {
+      try oversized.readBinary()
     }
 
     // Negative list count.
     var negativeList = ThriftReader([0x08, 0xFF, 0xFF, 0xFF, 0xFF])
-    XCTAssertThrowsError(try negativeList.readListBegin())
+    assertThrows(.negativeSize(.list, -1)) { try negativeList.readListBegin() }
 
     // One element over the per-container cap.
     var tooLarge = ThriftReader([0x08, 0x00, 0x00, 0x27, 0x11])
-    XCTAssertThrowsError(try tooLarge.readListBegin()) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .parse)
+    assertThrows(.sizeExceedsMaximum(.list, 10_001, maximum: 10_000)) {
+      try tooLarge.readListBegin()
     }
   }
 
@@ -189,8 +198,8 @@ final class ThriftBinaryTests: XCTestCase {
     for _ in 0..<10 {
       _ = try reader.readListBegin()
     }
-    XCTAssertThrowsError(try reader.readListBegin()) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .parse)
+    assertThrows(.totalElementsExceedMaximum(110_000, maximum: 100_000)) {
+      try reader.readListBegin()
     }
   }
 
@@ -211,9 +220,7 @@ final class ThriftBinaryTests: XCTestCase {
     XCTAssertTrue(shallow.isAtEnd)
 
     var deep = ThriftReader(nestedStructs(70))
-    XCTAssertThrowsError(try deep.skip(.structure)) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .parse)
-    }
+    assertThrows(.nestingTooDeep(maximum: 64)) { try deep.skip(.structure) }
   }
 
   // MARK: Cross-binding vector events
@@ -325,13 +332,12 @@ final class ThriftBinaryTests: XCTestCase {
     XCTAssertThrowsError(
       try Base64.decodeStandard(TestVectors.string("event_garbage_b64"))
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .parse)
+      XCTAssertEqual(
+        error as? XChatError, .parse(.base64(.invalidCharacter(UInt8(ascii: "!")))))
     }
 
     var reader = ThriftReader([0x9E, 0x8B, 0x5A, 0x9D, 0xEB, 0xDE, 0x9E])
-    XCTAssertThrowsError(try reader.readFieldBegin()) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .parse)
-    }
+    assertThrows(.unknownType(0x9E)) { try reader.readFieldBegin() }
   }
 
   /// End to end over real bytes: parse the key-change event, take its

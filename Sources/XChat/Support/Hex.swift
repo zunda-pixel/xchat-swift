@@ -16,7 +16,7 @@ public enum Hex {
   public static func decode(_ string: String) throws -> [UInt8] {
     let chars = Array(string.utf8)
     if chars.count % 2 != 0 {
-      throw XChatError.parse("Invalid hex length: \(chars.count)")
+      throw XChatError.parse(.hex(.oddLength(chars.count)))
     }
     var out = [UInt8]()
     out.reserveCapacity(chars.count / 2)
@@ -26,7 +26,7 @@ public enum Hex {
         let hi = Hex.digit(chars[i]),
         let lo = Hex.digit(chars[i + 1])
       else {
-        throw XChatError.parse("Invalid hex character in: \(string)")
+        throw XChatError.parse(.hex(.invalidCharacter(in: string)))
       }
       out.append(hi << 4 | lo)
       i += 2

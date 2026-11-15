@@ -29,8 +29,7 @@ func deriveMessageKey(
   messageId: String
 ) throws -> [UInt8] {
   guard let sender = Int64(senderId) else {
-    throw XChatError.decryption(
-      "message key needs a numeric sender id, got '\(senderId)'")
+    throw XChatError.decryption(.nonNumericSenderId(senderId))
   }
   let info = "\(sender):\(messageId)"
   return try hkdfWithInfo(

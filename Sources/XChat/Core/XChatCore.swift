@@ -69,7 +69,7 @@ public final class XChatCore {
   /// wiping the returned bytes.
   public func exportKeys() throws -> (identity: [UInt8], signing: [UInt8]?) {
     guard let identityPrivateKey else {
-      throw XChatError.invalidState("keys are not loaded: import keys first")
+      throw XChatError.invalidState(.keysNotLoaded)
     }
     return (identityPrivateKey, signingPrivateKey)
   }
@@ -77,7 +77,7 @@ public final class XChatCore {
   /// The loaded identity key's SEC1 public key (65 bytes).
   public func identityPublicKey() throws -> [UInt8] {
     guard let identityPrivateKey else {
-      throw XChatError.invalidState("keys are not loaded: import keys first")
+      throw XChatError.invalidState(.keysNotLoaded)
     }
     return try derivePublicKey(privateKey: identityPrivateKey)
   }
@@ -127,10 +127,8 @@ public final class XChatCore {
     let parsed: [Result<MessageEvent, XChatError>] = events.map { eventB64 in
       do {
         return .success(try parseEvent(eventB64))
-      } catch let error as XChatError {
-        return .failure(error)
       } catch {
-        return .failure(.internalError(String(describing: error)))
+        return .failure(XChatError(error))
       }
     }
 
@@ -138,7 +136,7 @@ public final class XChatCore {
     var conflictingVersions: Set<String> = []
     var keyChanges: [Int: KeyChange] = [:]
     var verifiedKeyIndices: [Int] = []
-    var errors: [Int: String] = [:]
+    var errors: [Int: XChatError] = [:]
     var batchConversations: Set<String> = []
     for (index, result) in parsed.enumerated() {
       guard let event = try? result.get() else { continue }
@@ -168,7 +166,7 @@ public final class XChatCore {
           keys[version] = key
         }
       } catch {
-        errors[index] = reason(of: error)
+        errors[index] = XChatError(error)
       }
     }
 
@@ -204,7 +202,7 @@ public final class XChatCore {
         decrypted.append(
           DecryptedEvent(event: decryptedEvent, originalB64: eventB64))
       } catch {
-        errors[index] = (error as? XChatError)?.message ?? String(describing: error)
+        errors[index] = XChatError(error)
       }
     }
 
@@ -286,7 +284,7 @@ public final class XChatCore {
       : checkEventSignature(
         event: parsed, detail: .messageCreate(create),
         signingKeys: signatureKeys(signingKeys))
-    try enforceVerification(check, label: "Message")
+    try enforceVerification(check, of: .message)
 
     let plaintext: [UInt8]
     if unencrypted {
@@ -294,12 +292,8 @@ public final class XChatCore {
     } else {
       let version = create.conversationKeyVersion ?? ""
       guard let conversationKey = keys[version] else {
-        let available = keys.keys.sorted().joined(separator: ", ")
         throw XChatError.decryption(
-          "Message encrypted with key version '\(version)' but no matching key found. "
-            + "Available versions: [\(available)]. Include the conversation's "
-            + "KeyChange events in the batch passed to decryptEvents(), or pass the "
-            + "matching key map to decryptEvent().")
+          .missingConversationKey(version: version, available: keys.keys.sorted()))
       }
       let messageKey = try messageKeyFor(parsed, create: create, conversationKey: conversationKey)
       plaintext = try decryptMessage(
@@ -337,7 +331,7 @@ public final class XChatCore {
       event: parsed, detail: .conversationKeyChange(change),
       signingKeys: signatureKeys(signingKeys),
       plaintextConversationKeyB64: plaintextKey.map(Base64.encodeStandard))
-    try enforceVerification(check, label: "KeyChange")
+    try enforceVerification(check, of: .keyChange)
     if check == .verified, let conversationId = parsed.conversationId,
       let version = signatureVersion(of: parsed)
     {
@@ -362,18 +356,17 @@ public final class XChatCore {
   // MARK: Key handling
 
   /// Throws under the reject-unverified policy unless `check` verified.
-  private func enforceVerification(_ check: EventSignatureCheck, label: String) throws {
+  private func enforceVerification(
+    _ check: EventSignatureCheck, of event: XChatError.SignedEvent
+  ) throws {
     guard rejectUnverified else { return }
     switch check {
     case .verified:
       return
     case .unverifiable:
-      throw XChatError.verification(
-        "\(label) signature could not be verified: "
-          + "signature missing or no matching signing key")
-    case .failed(let reason):
-      throw XChatError.verification(
-        "\(label) signature verification failed: \(reason)")
+      throw XChatError.verification(.unverifiable(event))
+    case .failed(let rejection):
+      throw XChatError.verification(.rejected(event, rejection))
     }
   }
 
@@ -410,8 +403,7 @@ public final class XChatCore {
       return nil
     }
     guard let senderId = parsed.senderId, let messageId = parsed.messageId else {
-      throw XChatError.decryption(
-        "message key needs the event's sender id and message id")
+      throw XChatError.decryption(.missingSenderOrMessageId)
     }
     return try deriveMessageKey(
       conversationKey: conversationKey, senderId: senderId, messageId: messageId)
@@ -448,15 +440,10 @@ public final class XChatCore {
     let bytes: [UInt8]
     do {
       bytes = try Base64.decodeStandard(eventB64)
-    } catch {
-      throw XChatError.parse("Invalid base64 event: \(reason(of: error))")
+    } catch XChatError.parse(.base64(let failure)) {
+      throw XChatError.parse(.eventBase64(failure))
     }
-    var reader = ThriftReader(bytes)
-    do {
-      return try MessageEvent.read(&reader)
-    } catch {
-      throw XChatError.parse("Thrift parse error: \(reason(of: error))")
-    }
+    return try readThrift(bytes, as: XChatError.ParseFailure.event, MessageEvent.read)
   }
 }
 
@@ -473,10 +460,6 @@ private func eventMeta(_ event: MessageEvent) -> EventMeta {
     createdAtMilliseconds: event.createdAtMilliseconds.flatMap(Int64.init))
 }
 
-private func reason(of error: some Error) -> String {
-  (error as? XChatError)?.message ?? String(describing: error)
-}
-
 /// A decrypted payload, with the wire preview kept for validation.
 private struct ParsedMessageContent {
   var content: MessageContent
@@ -486,13 +469,8 @@ private struct ParsedMessageContent {
 }
 
 private func parseMessageContent(_ bytes: [UInt8]) throws -> ParsedMessageContent {
-  var reader = ThriftReader(bytes)
-  let holder: MessageEntryHolder
-  do {
-    holder = try MessageEntryHolder.read(&reader)
-  } catch {
-    throw XChatError.parse("Content parse error: \(reason(of: error))")
-  }
+  let holder = try readThrift(
+    bytes, as: XChatError.ParseFailure.messageContents, MessageEntryHolder.read)
 
   var attachments: [AttachmentInfo] = []
   var mediaHashes: [MediaHashReference] = []

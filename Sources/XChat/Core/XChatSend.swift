@@ -164,19 +164,26 @@ extension XChatCore {
     conversationKeyVersion: String,
     forKeyRotation: Bool = false
   ) throws -> PreparedConversationChange {
-    try validateUserId("sender_id", senderId)
-    try validateKeyVersion("conversation_key_version", conversationKeyVersion)
+    guard isUserId(senderId) else {
+      throw XChatError.invalidInput(.senderId(senderId))
+    }
+    guard isKeyVersion(conversationKeyVersion) else {
+      throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
+    }
     guard !participants.isEmpty else {
-      throw XChatError.invalidInput("public_keys must not be empty")
+      throw XChatError.invalidInput(.noParticipants)
     }
 
     // Keep each user's newest key version.
     var best: [String: ConversationParticipantPublicKey] = [:]
     var order: [String] = []
     for participant in participants {
-      try validateUserId("public_keys user_id", participant.userId)
-      try validateKeyVersion(
-        "public_keys public_key_version", participant.publicKeyVersion)
+      guard isUserId(participant.userId) else {
+        throw XChatError.invalidInput(.participantUserId(participant.userId))
+      }
+      guard isKeyVersion(participant.publicKeyVersion) else {
+        throw XChatError.invalidInput(.participantKeyVersion(participant.publicKeyVersion))
+      }
       if let current = best[participant.userId] {
         let newer: Bool
         if let newVersion = UInt64(participant.publicKeyVersion),
@@ -200,9 +207,7 @@ extension XChatCore {
       let distinctIds = Set(participants.map(\.userId))
       guard distinctIds.count == 2 else {
         throw XChatError.invalidInput(
-          "cannot derive a one-to-one conversation id from "
-            + "\(distinctIds.count) distinct user(s); "
-            + "pass conversation_id explicitly for group conversations")
+          .conversationIdNotDerivable(distinctUsers: distinctIds.count))
       }
       let ids = order
       resolvedConversationId = joinSortedPair(ids[0], ids[1])
@@ -233,11 +238,10 @@ extension XChatCore {
         forKeyRotation: forKeyRotation))
 
     guard let signingPrivateKey else {
-      throw XChatError.invalidState("signing key is not loaded")
+      throw XChatError.invalidState(.signingKeyNotLoaded)
     }
     guard let signingKeyVersion = keyVersion else {
-      throw XChatError.invalidInput(
-        "signing key version is not set: import keys with its public key version")
+      throw XChatError.invalidInput(.signingKeyVersionNotSet)
     }
     let messageId = generateMessageId()
     let signatureVersion = keyChangeSignatureVersion(
@@ -310,16 +314,19 @@ extension XChatCore {
     embeddedSigners: [(senderId: String, publicKeyVersion: String)]
   ) throws -> EncryptedMessagePayload {
     guard conversationKey.count == 32 else {
-      throw XChatError.invalidInput("Invalid conversation key (expected 32 bytes)")
+      throw XChatError.invalidInput(.conversationKeyLength(conversationKey.count))
     }
-    try validateUserId("sender_id", senderId)
-    try validateKeyVersion("conversation_key_version", conversationKeyVersion)
+    guard isUserId(senderId) else {
+      throw XChatError.invalidInput(.senderId(senderId))
+    }
+    guard isKeyVersion(conversationKeyVersion) else {
+      throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
+    }
     guard let signingPrivateKey else {
-      throw XChatError.invalidState("signing key is not loaded")
+      throw XChatError.invalidState(.signingKeyNotLoaded)
     }
     guard let signingKeyVersion = keyVersion else {
-      throw XChatError.invalidInput(
-        "signing key version is not set: import keys with its public key version")
+      throw XChatError.invalidInput(.signingKeyVersionNotSet)
     }
 
     let encrypted: [UInt8]
@@ -365,8 +372,7 @@ extension XChatCore {
     outgoing.messageEventSignature = placeholder
 
     guard let payload = eventSignaturePayload(event: outgoing, detail: detail) else {
-      throw XChatError.invalidInput(
-        "Signature payload contains comma-separated component")
+      throw XChatError.invalidInput(.signaturePayloadContainsComma)
     }
     let signature = try sign(privateKey: signingPrivateKey, payload: Array(payload.utf8))
 
@@ -487,9 +493,7 @@ extension XChatCore {
       guard entity.start >= 0, entity.end >= entity.start,
         Int(entity.end) <= textByteCount
       else {
-        throw XChatError.invalidInput(
-          "Invalid entity: offsets \(entity.start)..<\(entity.end) are not a range "
-            + "of the text")
+        throw XChatError.invalidInput(.entityRange(start: entity.start, end: entity.end))
       }
       let content: RichTextContent
       switch entity.type {
@@ -522,27 +526,21 @@ extension XChatCore {
         let filename, let mediaType, let durationMilliseconds,
         let plaintextSHA256):
         guard !mediaHashKey.isEmpty else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)].media_hash_key: must not be empty")
+          throw XChatError.invalidInput(.attachment(index: index, .emptyMediaHashKey))
         }
         guard width >= 0, height >= 0 else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)]: width and height must not be negative")
+          throw XChatError.invalidInput(.attachment(index: index, .negativeDimensions))
         }
         guard filesizeBytes > 0 else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)].filesize_bytes: must be positive")
+          throw XChatError.invalidInput(.attachment(index: index, .nonPositiveFilesize))
         }
         guard !filename.isEmpty else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)].filename: must not be empty")
+          throw XChatError.invalidInput(.attachment(index: index, .emptyFilename))
         }
         var mediaTypeValue: MediaType?
         if let mediaType {
           guard let parsed = MediaType(rawValue: mediaType) else {
-            throw XChatError.invalidInput(
-              "Invalid attachments[\(index)].media_type: \(mediaType) is not a "
-                + "media type")
+            throw XChatError.invalidInput(.attachment(index: index, .unknownMediaType(mediaType)))
           }
           mediaTypeValue = parsed
         }
@@ -552,9 +550,7 @@ extension XChatCore {
             let decoded = try? Base64.decodeStandard(plaintextSHA256),
             decoded.count == 32
           else {
-            throw XChatError.invalidInput(
-              "Invalid attachments[\(index)].plaintext_sha256: pass the base64 "
-                + "SHA-256 of the file's plaintext bytes")
+            throw XChatError.invalidInput(.attachment(index: index, .plaintextSHA256))
           }
           plaintextHash = decoded
         }
@@ -574,8 +570,7 @@ extension XChatCore {
 
       case .url(let url, let displayTitle, let bannerImage, let faviconImage):
         guard !url.isEmpty else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)].url: must not be empty")
+          throw XChatError.invalidInput(.attachment(index: index, .emptyURL))
         }
         return .url(
           UrlAttachment(
@@ -591,8 +586,7 @@ extension XChatCore {
 
       case .post(let restId, let postURL):
         guard restId?.isEmpty == false || postURL?.isEmpty == false else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)]: a post needs rest_id, post_url, or both")
+          throw XChatError.invalidInput(.attachment(index: index, .postWithoutReference))
         }
         return .post(
           PostAttachment(
@@ -605,24 +599,19 @@ extension XChatCore {
     _ image: UrlAttachmentImageDescriptor, index: Int
   ) throws -> UrlAttachmentImage {
     guard !image.mediaHashKey.isEmpty else {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image media_hash_key: must not be empty")
+      throw XChatError.invalidInput(.attachment(index: index, .imageEmptyMediaHashKey))
     }
     guard image.filesizeBytes > 0 else {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image filesize_bytes: must be positive")
+      throw XChatError.invalidInput(.attachment(index: index, .imageNonPositiveFilesize))
     }
     guard !image.filename.isEmpty else {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image filename: must not be empty")
+      throw XChatError.invalidInput(.attachment(index: index, .imageEmptyFilename))
     }
     if let width = image.width, width < 0 {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image width: must not be negative")
+      throw XChatError.invalidInput(.attachment(index: index, .imageNegativeWidth))
     }
     if let height = image.height, height < 0 {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image height: must not be negative")
+      throw XChatError.invalidInput(.attachment(index: index, .imageNegativeHeight))
     }
     let dimensions: MediaDimensions? =
       image.width != nil || image.height != nil
@@ -669,13 +658,16 @@ extension XChatCore {
   ) {
     let raw = try parseEvent(replyToEventB64)
     guard raw.conversationId == conversationId else {
-      throw XChatError.invalidInput("the reply target belongs to a different conversation")
+      throw XChatError.invalidInput(.quotedMessageInOtherConversation)
     }
-    guard case .messageCreate(let create)? = raw.detail, let contents = create.contents else {
-      throw XChatError.invalidInput("the reply target is not a message event")
+    guard case .messageCreate(let create)? = raw.detail else {
+      throw XChatError.invalidInput(.notMessageEvent(.quotedMessage))
+    }
+    guard let contents = create.contents else {
+      throw XChatError.invalidInput(.noContents(.quotedMessage))
     }
     guard let sequenceId = raw.sequenceId else {
-      throw XChatError.invalidInput("the reply target event carries no sequence_id")
+      throw XChatError.invalidInput(.noSequenceId(.quotedMessage))
     }
     let key = try quotedContentsKey(
       raw, conversationKey: conversationKey,
@@ -687,16 +679,16 @@ extension XChatCore {
     } else {
       plaintext = contents
     }
-    var reader = ThriftReader(plaintext)
-    let holder: MessageEntryHolder
-    do {
-      holder = try MessageEntryHolder.read(&reader)
-    } catch {
-      throw XChatError.parse(
-        "Content parse error: \((error as? XChatError)?.message ?? String(describing: error))")
-    }
-    guard case .message(let original)? = holder.contents else {
-      throw XChatError.invalidInput("the reply target is not a text message")
+    let holder = try readThrift(
+      plaintext, as: XChatError.ParseFailure.messageContents, MessageEntryHolder.read)
+    let original: MessageContents
+    switch holder.contents {
+    case .message(let message):
+      original = message
+    case .messageEdit:
+      throw XChatError.invalidInput(.messageIsEdit(.quotedMessage))
+    default:
+      throw XChatError.invalidInput(.notTextMessage(.quotedMessage))
     }
 
     var preview = ReplyingToPreview()
@@ -735,8 +727,9 @@ extension XChatCore {
       version == conversationKeyVersion
       ? conversationKey : replyToConversationKeys[version]
     guard let quotedKey else {
+      let available = Set(replyToConversationKeys.keys).union([conversationKeyVersion])
       throw XChatError.decryption(
-        "missing conversation key version '\(version)' for the reply target")
+        .missingConversationKey(version: version, available: available.sorted()))
     }
     if usesMessageKey(raw) {
       return try deriveMessageKey(
@@ -764,14 +757,14 @@ extension XChatCore {
 
   private func requireSequenceId(_ value: String) throws -> String {
     guard !value.isEmpty else {
-      throw XChatError.invalidInput("Invalid target message sequence id: must not be empty")
+      throw XChatError.invalidInput(.emptyTargetSequenceId)
     }
     return value
   }
 
   private func requireEmoji(_ value: String) throws -> String {
     guard !value.isEmpty else {
-      throw XChatError.invalidInput("Invalid reaction emoji: must not be empty")
+      throw XChatError.invalidInput(.emptyReactionEmoji)
     }
     return value
   }
@@ -803,23 +796,16 @@ private func isDigits(_ value: String) -> Bool {
   !value.isEmpty && value.allSatisfy { $0.isASCII && $0.isNumber }
 }
 
-/// Checks a user id in canonical decimal form: digits, no leading zero, a
-/// positive 64-bit integer.
-private func validateUserId(_ field: String, _ value: String) throws {
-  let canonical = Int64(value).map(String.init)
-  guard canonical == value, let number = Int64(value), number > 0 else {
-    throw XChatError.invalidInput(
-      "Invalid \(field) '\(value)': pass a numeric user id (digits only)")
-  }
+/// Whether `value` is a user id in canonical decimal form: digits, no
+/// leading zero, a positive 64-bit integer.
+private func isUserId(_ value: String) -> Bool {
+  guard let number = Int64(value) else { return false }
+  return String(number) == value && number > 0
 }
 
-/// Checks a key version as the X API returns it: a non-negative integer in
-/// canonical decimal form.
-private func validateKeyVersion(_ field: String, _ value: String) throws {
-  let canonical = Int64(value).map(String.init)
-  guard canonical == value, let number = Int64(value), number >= 0 else {
-    throw XChatError.invalidInput(
-      "Invalid \(field) '\(value)': pass the key version as the X API returns it, "
-        + "an integer in digits")
-  }
+/// Whether `value` is a key version as the X API returns it: a
+/// non-negative integer in canonical decimal form.
+private func isKeyVersion(_ value: String) -> Bool {
+  guard let number = Int64(value) else { return false }
+  return String(number) == value && number >= 0
 }

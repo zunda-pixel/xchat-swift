@@ -129,7 +129,7 @@ struct MessageContents: Sendable, Equatable {
       case 3:
         contents.attachments = try readStructList(field, "attachments", &reader) {
           guard let attachment = try MessageAttachment.read(&$0) else {
-            throw XChatError.parse("message attachment carries no variant")
+            throw ThriftError(.messageAttachmentWithoutVariant)
           }
           return attachment
         }
@@ -784,7 +784,7 @@ struct ReplyingToPreview: Sendable, Equatable {
       case 4:
         preview.attachments = try readStructList(field, "attachments", &reader) {
           guard let attachment = try MessageAttachment.read(&$0) else {
-            throw XChatError.parse("preview attachment carries no variant")
+            throw ThriftError(.previewAttachmentWithoutVariant)
           }
           return attachment
         }

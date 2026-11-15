@@ -5,8 +5,7 @@
 /// Ensures a field's wire type matches the struct's declared type.
 func expectField(_ field: ThriftField, _ type: ThriftType, _ name: String) throws {
   guard field.type == type else {
-    throw XChatError.parse(
-      "Thrift field \(name) (#\(field.id)) is \(field.type), expected \(type)")
+    throw ThriftError(.fieldType(field: name, id: field.id, actual: field.type, expected: type))
   }
 }
 
@@ -58,7 +57,8 @@ func readStringList(
   try expectField(field, .list, name)
   let list = try reader.readListBegin()
   guard list.elementType == .binary else {
-    throw XChatError.parse("Thrift list \(name) has element type \(list.elementType)")
+    throw ThriftError(
+      .listElementType(field: name, actual: list.elementType, expected: .binary))
   }
   var items: [String] = []
   items.reserveCapacity(list.count)
@@ -77,7 +77,8 @@ func readStructList<T>(
   try expectField(field, .list, name)
   let list = try reader.readListBegin()
   guard list.elementType == .structure else {
-    throw XChatError.parse("Thrift list \(name) has element type \(list.elementType)")
+    throw ThriftError(
+      .listElementType(field: name, actual: list.elementType, expected: .structure))
   }
   var items: [T] = []
   items.reserveCapacity(list.count)
@@ -93,8 +94,7 @@ func readStringMap(
   try expectField(field, .map, name)
   let map = try reader.readMapBegin()
   guard map.keyType == .binary, map.valueType == .binary else {
-    throw XChatError.parse(
-      "Thrift map \(name) is \(map.keyType) to \(map.valueType), expected string to string")
+    throw ThriftError(.mapTypes(field: name, key: map.keyType, value: map.valueType))
   }
   var values: [String: String] = [:]
   values.reserveCapacity(map.count)

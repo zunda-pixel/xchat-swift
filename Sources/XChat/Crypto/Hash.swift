@@ -24,7 +24,7 @@ func hkdfWithInfo(secret: [UInt8], salt: String, info: [UInt8], length: Int) thr
   let maximumLength = 32 * 255
   guard length <= maximumLength else {
     throw XChatError.internalError(
-      "Requested length \(length) exceeds maximum \(maximumLength)")
+      .hkdfLengthExceedsMaximum(length, maximum: maximumLength))
   }
 
   // An empty salt expands to 32 zero bytes.
