@@ -551,13 +551,13 @@ final class FilesAndKeysTests: XCTestCase {
     }
   }
 
-  /// The conversation key an outgoing file's key derives from is the
-  /// sender's own, so one of the wrong length is reported as that
-  /// parameter, not as the message failing to open under it, for a message
-  /// under the conversation key itself (v0) or a key derived from it (v1).
-  func testOutgoingFileChecksTheConversationKeyLength() throws {
+  /// The conversation key and version an outgoing file's key derives from
+  /// are the sender's own, so a key of the wrong length or a version not in
+  /// canonical form is reported as that parameter, not as the message
+  /// failing to open under it or having no key, for a message under the
+  /// conversation key itself (v0) or a key derived from it (v1).
+  func testOutgoingFileChecksItsOwnKeyAndVersion() throws {
     let core = XChatCore()
-    let shortKey = [UInt8](repeating: 1, count: 31)
     let messages = [
       (
         TestVectors.string("event_conversation_key_media_b64"),
@@ -571,23 +571,32 @@ final class FilesAndKeysTests: XCTestCase {
       ),
     ]
     for (eventB64, version, mediaHashKey) in messages {
-      XCTAssertThrowsError(
-        try core.encryptFile(
-          [1], eventB64: eventB64, conversationKey: shortKey,
-          conversationKeyVersion: version, mediaHashKey: mediaHashKey),
-        version
-      ) { error in
-        XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(31)), version)
-      }
-      // FileEncryptor is noncopyable, which XCTAssertThrowsError cannot
-      // return.
-      do {
-        _ = try core.fileEncryptor(
-          eventB64: eventB64, conversationKey: shortKey, conversationKeyVersion: version,
-          mediaHashKey: mediaHashKey)
-        XCTFail("expected an error for version \(version)")
-      } catch {
-        XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(31)), version)
+      let parameters: [(key: [UInt8], version: String, failure: XChatError.InputFailure)] = [
+        ([UInt8](repeating: 1, count: 31), version, .conversationKeyLength(31)),
+        (
+          TestVectors.bytes("conversation_key_b64"), "0" + version,
+          .conversationKeyVersion("0" + version)
+        ),
+      ]
+      for (key, givenVersion, failure) in parameters {
+        XCTAssertThrowsError(
+          try core.encryptFile(
+            [1], eventB64: eventB64, conversationKey: key,
+            conversationKeyVersion: givenVersion, mediaHashKey: mediaHashKey),
+          givenVersion
+        ) { error in
+          XCTAssertEqual(error as? XChatError, .invalidInput(failure), givenVersion)
+        }
+        // FileEncryptor is noncopyable, which XCTAssertThrowsError cannot
+        // return.
+        do {
+          _ = try core.fileEncryptor(
+            eventB64: eventB64, conversationKey: key, conversationKeyVersion: givenVersion,
+            mediaHashKey: mediaHashKey)
+          XCTFail("expected an error for version \(givenVersion)")
+        } catch {
+          XCTAssertEqual(error as? XChatError, .invalidInput(failure), givenVersion)
+        }
       }
     }
   }

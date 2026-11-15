@@ -839,7 +839,7 @@ private func isUserId(_ value: String) -> Bool {
 
 /// Whether `value` is a key version as the X API returns it: a
 /// non-negative integer in canonical decimal form.
-private func isKeyVersion(_ value: String) -> Bool {
+func isKeyVersion(_ value: String) -> Bool {
   guard let number = Int64(value) else { return false }
   return String(number) == value && number >= 0
 }

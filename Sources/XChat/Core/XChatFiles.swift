@@ -141,11 +141,15 @@ extension XChatCore {
     conversationKeyVersion: String,
     mediaHashKey: String
   ) throws -> [UInt8] {
-    // The key is the sender's own, as `encryptMessage` takes it. Opening the
-    // message with a key of the wrong length would report it as the
-    // message's contents not decrypting.
+    // The key and version are the sender's own, as `encryptMessage` takes
+    // them. Checked only by opening the message, a key of the wrong length
+    // would fail as the message's contents not decrypting, and a malformed
+    // version as no key being given for the message's version.
     guard conversationKey.count == 32 else {
       throw XChatError.invalidInput(.conversationKeyLength(conversationKey.count))
+    }
+    guard isKeyVersion(conversationKeyVersion) else {
+      throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
     }
     guard !mediaHashKey.isEmpty else {
       throw XChatError.invalidInput(.emptyMediaHashKey)
