@@ -4,18 +4,14 @@ extension XChatCore {
   /// Applies a `GET /2/chat/features` answer, given the status and body as
   /// received.
   ///
-  /// An accepted answer (200, body at most 64 KiB, JSON with a `features`
-  /// object) replaces the switches and picks the send format: v1 while
-  /// `v1_send` is on, else v0. Only a member whose value is the JSON `true`
-  /// turns its switch on; any other value (`false`, null, a number, a string,
-  /// an array, an object) reads off and does not reject the answer. When a
-  /// name repeats, the first member counts. `JSONDecoder` checks the body's
-  /// structure and member names but reads a number's or a string's contents
-  /// only when it decodes that value, so a fault such as `01` or an invalid
-  /// escape inside a member's value (which reads off) or inside another
-  /// top-level member's value does not reject the answer. Any other answer
-  /// changes nothing, so a failed read leaves the previous answer in force.
-  /// Returns whether the answer was accepted.
+  /// An accepted answer (200, body at most 64 KiB, which `JSONDecoder`
+  /// decodes as an object with a `features` object) replaces the switches
+  /// and picks the send format: v1 while `v1_send` is on, else v0. Only a
+  /// member whose value is the JSON `true` turns its switch on; any other
+  /// value (`false`, null, a number, a string, an array, an object) reads off
+  /// and does not reject the answer. Any other answer changes nothing, so a
+  /// failed read leaves the previous answer in force. Returns whether the
+  /// answer was accepted.
   @discardableResult
   public func applyFeatures(statusCode: Int, body: [UInt8]) -> Bool {
     guard statusCode == 200, body.count <= FeatureFetch.maxBodyBytes,
@@ -26,11 +22,15 @@ extension XChatCore {
     return true
   }
 
-  /// The switch names a response body turns on, or nil when the body is not
-  /// a JSON object with a `features` object as far as `JSONDecoder` checks it
-  /// (see `applyFeatures`), or when a member fails to decode for a reason
-  /// other than its type. Members whose value is not a boolean read off;
-  /// other top-level members' values are ignored.
+  /// The switch names a response body turns on, or nil when `JSONDecoder`
+  /// cannot decode the body as an object with a `features` object, or when a
+  /// member fails to decode for a reason other than its type. Members whose
+  /// value is not a boolean read off; other top-level members' values are
+  /// ignored. `JSONDecoder` accepts some input that strict JSON does not:
+  /// for example (seen on macOS 27.2), a number such as `01` or a string with
+  /// an escape such as `\q`, which reads off as a member's value and is
+  /// ignored elsewhere, and two members with the same name, of which the
+  /// first counts.
   static func parseFeatures(_ body: [UInt8]) -> Set<String>? {
     guard let response = try? JSONDecoder().decode(FeatureResponse.self, from: Data(body))
     else { return nil }
