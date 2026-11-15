@@ -41,8 +41,11 @@ extension XChatCore {
     /// Only a JSON boolean can turn a switch on. Any other value (null, a
     /// number, a string, an array, an object) reads off rather than failing:
     /// throwing would reject the whole answer, so one member the server
-    /// changes would keep every other switch from applying. Other decoding
-    /// failures still throw.
+    /// changes would keep every other switch from applying. Null is checked
+    /// with `decodeNil()` because `SingleValueDecodingContainer` documents
+    /// `valueNotFound` for it (JSONDecoder reports `typeMismatch` today).
+    /// Any other decoding failure still throws, although JSONDecoder reports
+    /// none for a value that is present.
     init(from decoder: any Decoder) throws {
       let value = try decoder.singleValueContainer()
       if value.decodeNil() {
