@@ -4,9 +4,9 @@ extension XChatCore {
   /// Applies a `GET /2/chat/features` answer, given the status and body as
   /// received.
   ///
-  /// An accepted answer (200, body at most 64 KiB, which `JSONDecoder`
-  /// decodes as an object with a `features` object) replaces the switches
-  /// and picks the send format: v1 while `v1_send` is on, else v0. Only a
+  /// An accepted answer (200, and a body of at most 64 KiB that
+  /// `JSONDecoder` decodes as an object with a `features` object) replaces
+  /// the switches and picks the send format: v1 while `v1_send` is on, else v0. Only a
   /// member of `features` whose value is the JSON `true` turns its switch
   /// on; any other value (`false`, null, a number, a string, an array, an
   /// object) reads off, and its type does not reject the answer. Any other
@@ -56,9 +56,9 @@ extension XChatCore {
     /// swiftlang/swift-foundation#2263 (not in 6.4.x) throws that (Foundation
     /// in Swift 6.4 and on macOS 27.2 reports `typeMismatch`). A failure
     /// other than a type mismatch still throws (although `JSONDecoder`
-    /// reports none here): the protocol documents only those two for a value, so any
-    /// other failure means broken data or a broken decoder, and the answer is
-    /// rejected like a broken body.
+    /// reports none here): the protocol documents only those two for a
+    /// value, so any other failure means broken data or a broken decoder, and
+    /// the answer is rejected like a broken body.
     init(from decoder: any Decoder) throws {
       let value = try decoder.singleValueContainer()
       if value.decodeNil() {
