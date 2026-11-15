@@ -687,6 +687,95 @@ final class SendTests: XCTestCase {
       XCTAssertEqual(error as? XChatError, .invalidState(.signingKeyVersionNotSet))
     }
   }
+
+  /// Every send checks its conversation key, version and sender id before
+  /// anything else it is given, so each reports a malformed one alike
+  /// whatever else is wrong: here, an entity out of range, an empty
+  /// reaction target, or an empty emoji, each reported once the key,
+  /// version and sender id are right.
+  func testSendsCheckTheirKeyVersionAndSenderIdFirst() throws {
+    let (core, _) = try makeCore()
+    let quoted = try core.encryptMessage(
+      text: "quoted", conversationId: Self.conversationId,
+      conversationKey: Self.conversationKey,
+      conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+    // A sent event has no sequence id until the server assigns one.
+    let quotedB64 = try rewritingEvent(quoted.eventB64) { $0.sequenceId = "7" }
+    let entities = [EntityDescriptor(start: 0, end: 99, type: .hashtag)]
+    let outOfRange = XChatError.InputFailure.entityRange(start: 0, end: 99)
+
+    typealias Send = (_ key: [UInt8], _ version: String, _ senderId: String) throws -> Void
+    let sends: [(name: String, send: Send, otherFailure: XChatError.InputFailure)] = [
+      (
+        "message",
+        { key, version, senderId in
+          _ = try core.encryptMessage(
+            text: "x", conversationId: Self.conversationId, conversationKey: key,
+            conversationKeyVersion: version, senderId: senderId, entities: entities)
+        },
+        outOfRange
+      ),
+      (
+        "reply",
+        { key, version, senderId in
+          _ = try core.encryptReply(
+            text: "x", replyToEventB64: quotedB64, conversationId: Self.conversationId,
+            conversationKey: key, conversationKeyVersion: version, senderId: senderId,
+            entities: entities)
+        },
+        outOfRange
+      ),
+      (
+        "reaction",
+        { key, version, senderId in
+          _ = try core.encryptReaction(
+            emoji: "👍", targetMessageSequenceId: "", conversationId: Self.conversationId,
+            conversationKey: key, conversationKeyVersion: version, senderId: senderId)
+        },
+        .emptyTargetSequenceId
+      ),
+      (
+        "reaction removal",
+        { key, version, senderId in
+          _ = try core.encryptRemoveReaction(
+            emoji: "", targetMessageSequenceId: "5", conversationId: Self.conversationId,
+            conversationKey: key, conversationKeyVersion: version, senderId: senderId)
+        },
+        .emptyReactionEmoji
+      ),
+      (
+        "edit",
+        { key, version, senderId in
+          _ = try core.encryptEdit(
+            targetMessageSequenceId: "5", updatedText: "x", targetMessageId: nil,
+            conversationId: Self.conversationId, conversationKey: key,
+            conversationKeyVersion: version, senderId: senderId, entities: entities)
+        },
+        outOfRange
+      ),
+    ]
+    let malformed:
+      [(key: [UInt8], version: String, senderId: String, failure: XChatError.InputFailure)] = [
+        (
+          [UInt8](repeating: 1, count: 31), Self.conversationKeyVersion, Self.senderId,
+          .conversationKeyLength(31)
+        ),
+        (Self.conversationKey, "01", Self.senderId, .conversationKeyVersion("01")),
+        (Self.conversationKey, Self.conversationKeyVersion, "abc", .senderId("abc")),
+      ]
+    for (name, send, otherFailure) in sends {
+      for (key, version, senderId, failure) in malformed {
+        XCTAssertThrowsError(try send(key, version, senderId), "\(name): \(failure)") { error in
+          XCTAssertEqual(error as? XChatError, .invalidInput(failure), "\(name): \(failure)")
+        }
+      }
+      XCTAssertThrowsError(
+        try send(Self.conversationKey, Self.conversationKeyVersion, Self.senderId), name
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(otherFailure), name)
+      }
+    }
+  }
 }
 
 extension AttachmentInfo {

@@ -18,6 +18,9 @@ extension XChatCore {
     shouldNotify: Bool? = nil,
     ttlMilliseconds: Int64? = nil
   ) throws -> EncryptedMessagePayload {
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId)
     let version = sendVersion
     let messageId = outgoingMessageId(
       version: version, conversationKey: conversationKey,
@@ -56,9 +59,9 @@ extension XChatCore {
     replyToAttachmentId: String? = nil,
     replyToConversationKeys: [String: [UInt8]] = [:]
   ) throws -> EncryptedMessagePayload {
-    // The quoted message is opened first, with the reply's conversation key
-    // when it is under the same version. Checked only when signing, a key
-    // of the wrong length would fail as that message's contents not
+    // Checked before the quoted message is opened, which uses the reply's
+    // conversation key when it is under the same version: checked after, a
+    // key of the wrong length would fail as that message's contents not
     // decrypting, a malformed version as no key being given for that
     // message, and a malformed sender id as its conversation not matching.
     try requireSendParameters(
@@ -98,7 +101,10 @@ extension XChatCore {
     senderId: String,
     shouldNotify: Bool? = nil
   ) throws -> EncryptedMessagePayload {
-    try encryptContent(
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId)
+    return try encryptContent(
       MessageEntryContents.reactionAdd(
         MessageReactionAdd(
           messageSequenceId: try requireSequenceId(targetMessageSequenceId),
@@ -119,7 +125,10 @@ extension XChatCore {
     senderId: String,
     shouldNotify: Bool? = nil
   ) throws -> EncryptedMessagePayload {
-    try encryptContent(
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId)
+    return try encryptContent(
       MessageEntryContents.reactionRemove(
         MessageReactionRemove(
           messageSequenceId: try requireSequenceId(targetMessageSequenceId),
@@ -144,6 +153,9 @@ extension XChatCore {
     entities: [EntityDescriptor]? = nil,
     shouldNotify: Bool? = nil
   ) throws -> EncryptedMessagePayload {
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId)
     let thriftEntities = try entities.map {
       try buildThriftEntities($0, text: updatedText)
     }
@@ -314,6 +326,8 @@ extension XChatCore {
     )
   }
 
+  /// Encrypts and signs a send's contents. The send has checked its key,
+  /// version and sender id with `requireSendParameters` first.
   private func encryptAndSign(
     contentBytes: [UInt8],
     conversationId: String,
@@ -326,9 +340,6 @@ extension XChatCore {
     ttlMilliseconds: Int64?,
     embeddedSigners: [(senderId: String, publicKeyVersion: String)]
   ) throws -> EncryptedMessagePayload {
-    try requireSendParameters(
-      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
-      senderId: senderId)
     guard let signingPrivateKey else {
       throw XChatError.invalidState(.signingKeyNotLoaded)
     }
@@ -430,7 +441,10 @@ extension XChatCore {
 
   /// Checks the parameters every send encrypts and signs with: a 32-byte
   /// conversation key, a sender id and a conversation-key version in
-  /// canonical decimal form.
+  /// canonical decimal form. Every send checks them before anything else it
+  /// is given, so whatever else is wrong, each send reports a malformed key,
+  /// version or sender id alike; a reply has to, because it opens the
+  /// message it quotes with that key.
   private func requireSendParameters(
     conversationKey: [UInt8],
     conversationKeyVersion: String,
