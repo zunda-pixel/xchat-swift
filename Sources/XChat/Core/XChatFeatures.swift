@@ -24,14 +24,14 @@ extension XChatCore {
 
   /// The switch names a response body turns on, or nil when `JSONDecoder`
   /// cannot decode the body as an object with a `features` object, or when a
-  /// member fails to decode for a reason other than its type. Members whose
-  /// value is not a boolean read off; other top-level members' values are
-  /// ignored. `JSONDecoder` accepts some values that strict JSON does not:
-  /// for example (seen on macOS 27.2), a number such as `01` or a string with
-  /// an escape such as `\q`, as a `features` member's value (which reads off)
-  /// or as another top-level member's value (which is ignored). When two
-  /// members have the same name, which JSON allows but leaves undefined, the
-  /// first counts.
+  /// member fails to decode for a reason other than its type. As long as
+  /// `JSONDecoder` decodes the body, members whose value is not a boolean
+  /// read off and other top-level members' values are ignored. `JSONDecoder`
+  /// accepts some values that strict JSON does not: for example (seen on
+  /// macOS 27.2), a number such as `01` or a string with an escape such as
+  /// `\q`, as a `features` member's value (which reads off) or as another
+  /// top-level member's value (which is ignored). When two members have the
+  /// same name, which JSON allows but leaves undefined, the first counts.
   static func parseFeatures(_ body: [UInt8]) -> Set<String>? {
     guard let response = try? JSONDecoder().decode(FeatureResponse.self, from: Data(body))
     else { return nil }
