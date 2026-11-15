@@ -304,8 +304,10 @@ extension XChatError {
     /// under a key the caller holds.
     case file(FileFailure, mediaHashKey: String?)
     /// A message is encrypted under a conversation-key version no key was
-    /// given for. `available` lists the versions there were keys for,
-    /// sorted.
+    /// given for. `available` lists the versions there were keys for, in
+    /// numeric order (`["9", "10"]`): sorted by length, then character by
+    /// character, so a version that is not in canonical decimal form sorts
+    /// by its length too.
     case missingConversationKey(MessageRole, version: String, available: [String])
     /// The keys of a message with per-message keys derive from its event's
     /// sender id and message id, and the event lacks one it needs.

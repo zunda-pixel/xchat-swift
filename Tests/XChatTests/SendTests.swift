@@ -264,6 +264,27 @@ final class SendTests: XCTestCase {
     }
   }
 
+  /// Without a key for the quoted message's version, a reply lists the
+  /// versions it has keys for, its own among them, in numeric order.
+  func testReplyListsTheVersionsItHasKeysForInOrder() throws {
+    let (core, _) = try makeCore(version: .v1)
+    let key = [UInt8](repeating: 1, count: 32)
+    XCTAssertThrowsError(
+      try core.encryptReply(
+        text: "a reply", replyToEventB64: TestVectors.string("event_message_key_b64"),
+        conversationId: Self.conversationId, conversationKey: Self.conversationKey,
+        conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId,
+        replyToConversationKeys: ["10": key, "9": key])
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .missingConversationKey(
+            .quotedMessage, version: TestVectors.string("message_key_conversation_key_version"),
+            available: ["9", "10", Self.conversationKeyVersion])))
+    }
+  }
+
   /// An event that cannot be quoted is reported by what it is, each a case
   /// of its own for the quoted message: a key change, a message event
   /// without contents or a sequence id, an edit, and a reaction.

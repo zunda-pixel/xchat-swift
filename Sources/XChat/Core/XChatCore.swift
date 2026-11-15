@@ -293,7 +293,8 @@ public final class XChatCore {
       let version = create.conversationKeyVersion ?? ""
       guard let conversationKey = keys[version] else {
         throw XChatError.decryption(
-          .missingConversationKey(.message, version: version, available: keys.keys.sorted()))
+          .missingConversationKey(
+            .message, version: version, available: keyVersionsInOrder(keys.keys)))
       }
       let messageKey = try messageKeyFor(
         parsed, create: create, conversationKey: conversationKey, role: .message)
@@ -465,6 +466,14 @@ public final class XChatCore {
     }
     return try readThrift(bytes, as: { .event(.thrift($0)) }, MessageEvent.read)
   }
+}
+
+/// Conversation-key versions in the order
+/// `DecryptionFailure.missingConversationKey` lists them: by length, then
+/// character by character, which puts versions in canonical decimal form in
+/// numeric order ("9" before "10") and any other strings in a fixed order.
+func keyVersionsInOrder(_ versions: some Sequence<String>) -> [String] {
+  versions.sorted { ($0.count, $0) < ($1.count, $1) }
 }
 
 /// Converts verified signing-key entries into the form the signature layer

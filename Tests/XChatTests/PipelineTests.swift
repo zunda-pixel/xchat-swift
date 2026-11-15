@@ -71,6 +71,7 @@ final class PipelineTests: XCTestCase {
     XCTAssertEqual(message.conversationKeyVersion, keyVersion)
   }
 
+  /// The versions keys were given for are listed in numeric order.
   func testMissingConversationKeyThrows() {
     XCTAssertThrowsError(
       try XChatCore().decryptEvent(
@@ -80,6 +81,19 @@ final class PipelineTests: XCTestCase {
       XCTAssertEqual(
         error as? XChatError,
         .decryption(.missingConversationKey(.message, version: "1001", available: [])))
+    }
+
+    let key = [UInt8](repeating: 0, count: 32)
+    XCTAssertThrowsError(
+      try XChatCore().decryptEvent(
+        TestVectors.string("event_message_b64"),
+        conversationKeys: ["10": key, "9": key, "100": key],
+        signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .missingConversationKey(.message, version: "1001", available: ["9", "10", "100"])))
     }
   }
 

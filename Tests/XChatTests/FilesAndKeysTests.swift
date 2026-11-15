@@ -134,18 +134,21 @@ final class FilesAndKeysTests: XCTestCase {
     }
   }
 
+  /// The versions keys were given for are listed in numeric order.
   func testMissingConversationKeyNamesTheVersion() throws {
     let core = XChatCore()
+    let key = [UInt8](repeating: 0, count: 32)
     XCTAssertThrowsError(
       try core.decryptFile(
         TestVectors.bytes("media_first_encrypted_b64"),
         eventB64: TestVectors.string("event_message_key_b64"),
-        conversationKeys: ["1": [UInt8](repeating: 0, count: 32)],
+        conversationKeys: ["10": key, "9": key, "100": key],
         mediaHashKey: TestVectors.string("media_first_hash_key"))
     ) { error in
       XCTAssertEqual(
         error as? XChatError,
-        .decryption(.missingConversationKey(.message, version: "2002", available: ["1"])))
+        .decryption(
+          .missingConversationKey(.message, version: "2002", available: ["9", "10", "100"])))
     }
   }
 

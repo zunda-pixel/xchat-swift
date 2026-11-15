@@ -208,7 +208,7 @@ extension XChatCore {
     } else {
       throw XChatError.decryption(
         .missingConversationKey(
-          role, version: version, available: conversationKeys.keys.sorted()))
+          role, version: version, available: keyVersionsInOrder(conversationKeys.keys)))
     }
 
     guard let contents = create.contents else {

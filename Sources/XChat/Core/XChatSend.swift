@@ -766,7 +766,7 @@ extension XChatCore {
       let available = Set(replyToConversationKeys.keys).union([conversationKeyVersion])
       throw XChatError.decryption(
         .missingConversationKey(
-          .quotedMessage, version: version, available: available.sorted()))
+          .quotedMessage, version: version, available: keyVersionsInOrder(available)))
     }
     if usesMessageKey(raw) {
       return try messageKey(of: raw, conversationKey: quotedKey, role: .quotedMessage)
