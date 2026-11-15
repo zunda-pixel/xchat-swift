@@ -145,7 +145,237 @@ final class FilesAndKeysTests: XCTestCase {
     ) { error in
       XCTAssertEqual(
         error as? XChatError,
-        .decryption(.missingConversationKey(version: "2002", available: ["1"])))
+        .decryption(.missingConversationKey(.message, version: "2002", available: ["1"])))
+    }
+  }
+
+  // MARK: Which message and key an error names
+
+  /// `eventB64` re-encoded after `change`. The signature no longer matches,
+  /// which opening a message's media does not check.
+  private func rewritingEvent(
+    _ eventB64: String, _ change: (inout MessageEvent) -> Void
+  ) throws -> String {
+    var event = try XChatCore().parseEvent(eventB64)
+    change(&event)
+    var writer = ThriftWriter()
+    event.write(to: &writer)
+    return Base64.encodeStandard(writer.data)
+  }
+
+  /// A v1 reply under a new conversation key, quoting `quotedB64`, which is
+  /// under `quotedKeys`.
+  private func reply(
+    quoting quotedB64: String, quotedKeys: [String: [UInt8]]
+  ) throws -> (eventB64: String, keys: [String: [UInt8]]) {
+    let core = XChatCore()
+    try core.importKeys(
+      identityPrivateKey: generateKeyPair().privateKey,
+      signingPrivateKey: generateKeyPair().privateKey, publicKeyVersion: "1")
+    core.sendVersion = .v1
+    let key = [UInt8](repeating: 0xa5, count: 32)
+    let payload = try core.encryptReply(
+      text: "reply", replyToEventB64: quotedB64,
+      conversationId: TestVectors.string("event_conversation_id"),
+      conversationKey: key, conversationKeyVersion: "999999",
+      senderId: TestVectors.string("event_sender_id"),
+      replyToConversationKeys: quotedKeys)
+    return (payload.eventB64, ["999999": key])
+  }
+
+  /// `reply` with its contents rewritten by `change` and encrypted again
+  /// under the reply's own key, derived from `keys`.
+  private func rewritingReply(
+    _ reply: String, keys: [String: [UInt8]], _ change: (inout MessageContents) -> Void
+  ) throws -> String {
+    let core = XChatCore()
+    var event = try core.parseEvent(reply)
+    guard case .messageCreate(var create)? = event.detail,
+      let version = create.conversationKeyVersion,
+      let conversationKey = keys[version]
+    else { return try XCTUnwrap(nil, "expected an encrypted message") }
+    let key =
+      try core.messageKeyFor(
+        event, create: create, conversationKey: conversationKey, role: .message)
+      ?? conversationKey
+    var reader = ThriftReader(try decryptMessage(key: key, ciphertext: create.contents ?? []))
+    var holder = try MessageEntryHolder.read(&reader)
+    guard case .message(var contents)? = holder.contents else {
+      return try XCTUnwrap(nil, "expected a text message")
+    }
+    change(&contents)
+    holder.contents = .message(contents)
+    var writer = ThriftWriter()
+    holder.write(to: &writer)
+    create.contents = try encryptMessage(key: key, plaintext: writer.data)
+    event.detail = .messageCreate(create)
+    var eventWriter = ThriftWriter()
+    event.write(to: &eventWriter)
+    return Base64.encodeStandard(eventWriter.data)
+  }
+
+  /// A key that does not open the message's contents is named with the
+  /// version it was given for, on the receiving and the sending side; a
+  /// key of the wrong length fails as decryption too.
+  func testKeyThatDoesNotOpenTheMessageNamesItsVersion() throws {
+    let core = XChatCore()
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        TestVectors.bytes("media_first_encrypted_b64"),
+        eventB64: TestVectors.string("event_message_key_b64"),
+        conversationKeys: ["2002": [UInt8](repeating: 1, count: 32)],
+        mediaHashKey: TestVectors.string("media_first_hash_key"))
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(
+            .message, .authenticationFailed, key: .conversationKey(version: "2002"))))
+    }
+
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        TestVectors.bytes("media_conversation_key_encrypted_b64"),
+        eventB64: TestVectors.string("event_conversation_key_media_b64"),
+        conversationKeys: ["1001": [UInt8](repeating: 1, count: 31)],
+        mediaHashKey: TestVectors.string("media_conversation_key_hash_key"))
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(.message, .keyLength(31), key: .conversationKey(version: "1001"))))
+    }
+
+    XCTAssertThrowsError(
+      try core.encryptFile(
+        [1], eventB64: TestVectors.string("event_message_key_b64"),
+        conversationKey: [UInt8](repeating: 1, count: 32), conversationKeyVersion: "2002",
+        mediaHashKey: TestVectors.string("media_first_hash_key"))
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(
+            .message, .authenticationFailed, key: .conversationKey(version: "2002"))))
+    }
+  }
+
+  /// Opening media a reply quotes, a key that does not open the quoted
+  /// message is reported for the quoted message: the conversation key given
+  /// for its version, or, when none was given, the key the reply carries.
+  func testKeyThatDoesNotOpenTheQuotedMessageNamesIt() throws {
+    let core = XChatCore()
+    let quotedVersion = TestVectors.string("message_key_conversation_key_version")
+    let reply = try reply(
+      quoting: TestVectors.string("event_message_key_b64"),
+      quotedKeys: try Self.messageKeyMap())
+    let encrypted = TestVectors.bytes("media_first_encrypted_b64")
+    let mediaHashKey = TestVectors.string("media_first_hash_key")
+
+    var wrongQuotedKey = reply.keys
+    wrongQuotedKey[quotedVersion] = [UInt8](repeating: 1, count: 32)
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        encrypted, eventB64: reply.eventB64, conversationKeys: wrongQuotedKey,
+        mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(
+            .quotedMessage, .authenticationFailed,
+            key: .conversationKey(version: quotedVersion))))
+    }
+
+    let wrongCarriedKey = try rewritingReply(reply.eventB64, keys: reply.keys) {
+      $0.replyingToPreview?.rawEventMessageKey = [UInt8](repeating: 1, count: 32)
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        encrypted, eventB64: wrongCarriedKey, conversationKeys: reply.keys,
+        mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(
+            .quotedMessage, .authenticationFailed,
+            key: .carriedByReply(version: quotedVersion))))
+    }
+  }
+
+  /// A reply carries no key for a quoted v0 message, so without its
+  /// conversation key the error names the quoted message and its version.
+  func testMissingKeyForTheQuotedMessageNamesIt() throws {
+    let reply = try reply(
+      quoting: TestVectors.string("event_conversation_key_media_b64"),
+      quotedKeys: ["1001": TestVectors.bytes("conversation_key_b64")])
+    XCTAssertThrowsError(
+      try XChatCore().decryptFile(
+        TestVectors.bytes("media_conversation_key_encrypted_b64"),
+        eventB64: reply.eventB64, conversationKeys: reply.keys,
+        mediaHashKey: TestVectors.string("media_conversation_key_hash_key"))
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .missingConversationKey(.quotedMessage, version: "1001", available: ["999999"])))
+    }
+  }
+
+  /// A per-message-key message whose event lacks an id its keys derive
+  /// from fails with the same case on every path: under its own
+  /// conversation key, under the key a reply carries, and quoted in a
+  /// reply.
+  func testMissingIdsOfAMessageKeyMessageFailAlike() throws {
+    let core = XChatCore()
+    let mediaHashKey = TestVectors.string("media_first_hash_key")
+    let withoutMessageId = try rewritingEvent(TestVectors.string("event_message_key_b64")) {
+      $0.messageId = nil
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: withoutMessageId, conversationKeys: try Self.messageKeyMap(),
+        mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .decryption(.missingSenderOrMessageId(.message)))
+    }
+
+    let reply = try reply(
+      quoting: TestVectors.string("event_message_key_b64"),
+      quotedKeys: try Self.messageKeyMap())
+    let carriedWithoutMessageId = try rewritingReply(reply.eventB64, keys: reply.keys) {
+      $0.replyingToPreview?.rawEventMessageCreate?.messageId = nil
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: carriedWithoutMessageId, conversationKeys: reply.keys,
+        mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .decryption(.missingSenderOrMessageId(.quotedMessage)))
+    }
+
+    let withoutSenderId = try rewritingEvent(TestVectors.string("event_message_key_b64")) {
+      $0.senderId = nil
+    }
+    XCTAssertThrowsError(
+      try self.reply(quoting: withoutSenderId, quotedKeys: try Self.messageKeyMap())
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .decryption(.missingSenderOrMessageId(.quotedMessage)))
+    }
+
+    let nonNumericSender = try rewritingEvent(TestVectors.string("event_message_key_b64")) {
+      $0.senderId = "sender-1"
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: nonNumericSender, conversationKeys: try Self.messageKeyMap(),
+        mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .decryption(.nonNumericSenderId(.message, "sender-1")))
     }
   }
 

@@ -79,7 +79,30 @@ final class PipelineTests: XCTestCase {
     ) { error in
       XCTAssertEqual(
         error as? XChatError,
-        .decryption(.missingConversationKey(version: "1001", available: [])))
+        .decryption(.missingConversationKey(.message, version: "1001", available: [])))
+    }
+  }
+
+  /// A key that does not open the message's contents is named with the
+  /// version it was given for, whether it is another key or the wrong
+  /// length.
+  func testKeyThatDoesNotOpenTheMessageNamesItsVersion() {
+    let cases: [([UInt8], XChatError.ContentsFailure)] = [
+      ([UInt8](repeating: 1, count: 32), .authenticationFailed),
+      ([UInt8](repeating: 1, count: 31), .keyLength(31)),
+    ]
+    for (key, failure) in cases {
+      XCTAssertThrowsError(
+        try XChatCore().decryptEvent(
+          TestVectors.string("event_message_b64"),
+          conversationKeys: ["1001": key],
+          signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
+      ) { error in
+        XCTAssertEqual(
+          error as? XChatError,
+          .decryption(
+            .messageContents(.message, failure, key: .conversationKey(version: "1001"))))
+      }
     }
   }
 
@@ -301,11 +324,12 @@ final class PipelineTests: XCTestCase {
       ])
     XCTAssertEqual(message.mediaHashes.map(\.source), ["media", "media"])
 
-    let messageKey = try deriveMessageKey(
-      conversationKey: try Hex.decode(
-        TestVectors.string("message_key_conversation_key_hex")),
-      senderId: TestVectors.string("message_key_sender_id"),
-      messageId: try XCTUnwrap(message.meta.messageId))
+    let messageKey = try XCTUnwrap(
+      deriveMessageKey(
+        conversationKey: try Hex.decode(
+          TestVectors.string("message_key_conversation_key_hex")),
+        senderId: TestVectors.string("message_key_sender_id"),
+        messageId: try XCTUnwrap(message.meta.messageId)))
 
     let files: [(hashField: String, encryptedField: String, plaintextField: String)] = [
       ("media_first_hash_key", "media_first_encrypted_b64", "media_first_plaintext_b64"),

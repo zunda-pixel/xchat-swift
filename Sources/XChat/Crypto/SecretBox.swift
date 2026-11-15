@@ -32,12 +32,12 @@ struct XSalsa20Poly1305: Sendable {
     // A nonce or tag of another length is not the one this ciphertext was
     // sealed with.
     guard nonce.count == Self.nonceSize, tag.count == Self.tagSize else {
-      throw XChatError.decryption(.authenticationFailed)
+      throw ContentsError(.authenticationFailed)
     }
     var plaintext = [UInt8](repeating: 0, count: max(1, ciphertext.count))
     let status = unsafe crypto_secretbox_open_detached(
       &plaintext, ciphertext, tag, UInt64(ciphertext.count), nonce, key)
-    guard status == 0 else { throw XChatError.decryption(.authenticationFailed) }
+    guard status == 0 else { throw ContentsError(.authenticationFailed) }
     return Array(plaintext.prefix(ciphertext.count))
   }
 }
@@ -58,14 +58,26 @@ func encryptMessage(key: [UInt8], plaintext: [UInt8]) throws -> [UInt8] {
   return nonce + tag + ciphertext
 }
 
+/// What `decryptMessage` throws when contents do not open. Only its callers
+/// know whose contents they were and where the key came from, so they wrap
+/// the failure in `XChatError.DecryptionFailure.messageContents`; see
+/// `decryptContents`.
+struct ContentsError: Error {
+  var failure: XChatError.ContentsFailure
+
+  init(_ failure: XChatError.ContentsFailure) {
+    self.failure = failure
+  }
+}
+
 /// Decrypts a message payload in the wire format above.
 func decryptMessage(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8] {
   // Minimum size: nonce (24) + tag (16) = 40 bytes.
   guard ciphertext.count >= XSalsa20Poly1305.nonceSize + XSalsa20Poly1305.tagSize else {
-    throw XChatError.decryption(.ciphertextTooShort)
+    throw ContentsError(.ciphertextTooShort)
   }
   guard key.count == 32 else {
-    throw XChatError.invalidInput(.conversationKeyLength(key.count))
+    throw ContentsError(.keyLength(key.count))
   }
   let nonceSize = XSalsa20Poly1305.nonceSize
   let tagSize = XSalsa20Poly1305.tagSize
@@ -74,4 +86,21 @@ func decryptMessage(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8] {
     nonce: Array(ciphertext[0..<nonceSize]),
     ciphertext: Array(ciphertext[(nonceSize + tagSize)...]),
     tag: Array(ciphertext[nonceSize..<nonceSize + tagSize]))
+}
+
+/// Decrypts the contents of the message `role` names with `key`, reporting
+/// contents that do not open as
+/// `XChatError.decryption(.messageContents(role, failure, key: source))`,
+/// where `source` says where `key` came from.
+func decryptContents(
+  _ contents: [UInt8],
+  key: [UInt8],
+  of role: XChatError.MessageRole,
+  from source: XChatError.ContentsKey
+) throws -> [UInt8] {
+  do {
+    return try decryptMessage(key: key, ciphertext: contents)
+  } catch let error as ContentsError {
+    throw XChatError.decryption(.messageContents(role, error.failure, key: source))
+  }
 }

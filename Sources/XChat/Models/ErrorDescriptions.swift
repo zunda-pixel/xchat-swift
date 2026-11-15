@@ -78,8 +78,6 @@ extension XChatError.InputFailure: CustomStringConvertible {
         + "they are"
     case .noContents(let role):
       "\(role) has no contents"
-    case .noMessageId(let role):
-      "\(role) has no message id"
     case .noSequenceId(let role):
       "\(role) carries no sequence_id"
     case .carriedMessageKeyLength(let length):
@@ -222,19 +220,48 @@ extension XChatError.DecryptionFailure: CustomStringConvertible {
       "Secretstream initialization failed"
     case .unknownStreamTag(let tag):
       "secretstream frame has an unknown tag: \(tag)"
+    case .messageContents(let role, let failure, let key):
+      Self.describe(failure, of: role, under: key)
     case .file(let fault, let mediaHashKey?):
       Self.describe(fault, mediaHashKey: mediaHashKey)
     case .file(let fault, nil):
       Self.describe(fault)
-    case .missingConversationKey(let version, let available):
-      "Message encrypted with key version '\(version)' but no matching key found. "
-        + "Available versions: [\(available.joined(separator: ", "))]. Pass the key for "
-        + "that version, or include the conversation's KeyChange events in the batch "
-        + "passed to decryptEvents()."
-    case .nonNumericSenderId(let senderId):
-      "message key needs a numeric sender id, got '\(senderId)'"
-    case .missingSenderOrMessageId:
-      "message key needs the event's sender id and message id"
+    case .missingConversationKey(let role, let version, let available) where available.isEmpty:
+      "\(role) is encrypted under conversation-key version '\(version)', and no "
+        + "conversation keys were given"
+    case .missingConversationKey(let role, let version, let available):
+      "\(role) is encrypted under conversation-key version '\(version)', and no key was "
+        + "given for it; keys were given for versions \(available.joined(separator: ", "))"
+    case .missingSenderOrMessageId(let role):
+      "\(role) uses per-message keys, which derive from its event's sender id and message "
+        + "id, and the event lacks one of them"
+    case .nonNumericSenderId(let role, let senderId):
+      "\(role) uses a per-message key, which derives from its sender id in decimal digits, "
+        + "and its event's sender id is '\(senderId)'"
+    }
+  }
+
+  private static func describe(
+    _ failure: XChatError.ContentsFailure,
+    of role: XChatError.MessageRole,
+    under key: XChatError.ContentsKey
+  ) -> String {
+    let source =
+      switch key {
+      case .conversationKey(let version):
+        "the conversation key for version '\(version)'"
+      case .carriedByReply(let version):
+        "the key the reply carries for it (no conversation key was given for version "
+          + "'\(version)')"
+      }
+    return switch failure {
+    case .authenticationFailed:
+      "the contents of \(role) do not decrypt under \(source): it is not the key they "
+        + "were encrypted under, or they are corrupted"
+    case .ciphertextTooShort:
+      "the contents of \(role) are too short to be encrypted contents"
+    case .keyLength(let length):
+      "\(source) is \(length) bytes, not 32, so it cannot decrypt the contents of \(role)"
     }
   }
 

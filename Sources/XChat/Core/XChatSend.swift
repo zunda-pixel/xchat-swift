@@ -338,8 +338,12 @@ extension XChatCore {
       contentsEncryptionVersion = nil
       signatureVersion = currentSignatureVersion
     case .v1:
-      let messageKey = try deriveMessageKey(
-        conversationKey: conversationKey, senderId: senderId, messageId: messageId)
+      guard
+        let messageKey = try deriveMessageKey(
+          conversationKey: conversationKey, senderId: senderId, messageId: messageId)
+      else {
+        throw XChatError.invalidInput(.senderId(senderId))
+      }
       encrypted = try XChat.encryptMessage(key: messageKey, plaintext: contentBytes)
       contentsEncryptionVersion = Int16(sendContentsEncryptionVersion)
       signatureVersion = messageSignatureVersion
@@ -669,14 +673,22 @@ extension XChatCore {
     guard let sequenceId = raw.sequenceId else {
       throw XChatError.invalidInput(.noSequenceId(.quotedMessage))
     }
-    let key = try quotedContentsKey(
-      raw, conversationKey: conversationKey,
-      conversationKeyVersion: conversationKeyVersion,
-      replyToConversationKeys: replyToConversationKeys)
     let plaintext: [UInt8]
-    if let key {
-      plaintext = try decryptMessage(key: key, ciphertext: contents)
+    var carriedKey: [UInt8]?
+    if let version = create.conversationKeyVersion {
+      let key = try quotedContentsKey(
+        raw, version: version, conversationKey: conversationKey,
+        conversationKeyVersion: conversationKeyVersion,
+        replyToConversationKeys: replyToConversationKeys)
+      plaintext = try decryptContents(
+        contents, key: key, of: .quotedMessage, from: .conversationKey(version: version))
+      // A message-key original travels with its key, so recipients
+      // without that conversation key can still validate it.
+      if usesMessageKey(raw) {
+        carriedKey = key
+      }
     } else {
+      // An unencrypted message's contents are plaintext Thrift already.
       plaintext = contents
     }
     let holder = try readThrift(
@@ -700,9 +712,7 @@ extension XChatCore {
     preview.messageId = raw.messageId
     preview.attachmentId = replyToAttachmentId
     preview.rawEventMessageCreate = raw
-    if usesMessageKey(raw) {
-      preview.rawEventMessageKey = key
-    }
+    preview.rawEventMessageKey = carriedKey
 
     var signers: [(senderId: String, publicKeyVersion: String)] = []
     if let senderId = raw.senderId,
@@ -713,29 +723,27 @@ extension XChatCore {
     return (preview, signers)
   }
 
-  /// Resolves the key for the quoted message, or returns nil for unencrypted contents.
+  /// The key the quoted message's contents are encrypted under: the
+  /// conversation key for `version`, the version they are encrypted under,
+  /// or the per-message key derived from it.
   private func quotedContentsKey(
     _ raw: MessageEvent,
+    version: String,
     conversationKey: [UInt8],
     conversationKeyVersion: String,
     replyToConversationKeys: [String: [UInt8]]
-  ) throws -> [UInt8]? {
-    guard case .messageCreate(let create)? = raw.detail,
-      let version = create.conversationKeyVersion
-    else { return nil }
+  ) throws -> [UInt8] {
     let quotedKey =
       version == conversationKeyVersion
       ? conversationKey : replyToConversationKeys[version]
     guard let quotedKey else {
       let available = Set(replyToConversationKeys.keys).union([conversationKeyVersion])
       throw XChatError.decryption(
-        .missingConversationKey(version: version, available: available.sorted()))
+        .missingConversationKey(
+          .quotedMessage, version: version, available: available.sorted()))
     }
     if usesMessageKey(raw) {
-      return try deriveMessageKey(
-        conversationKey: quotedKey,
-        senderId: raw.senderId ?? "",
-        messageId: raw.messageId ?? "")
+      return try messageKey(of: raw, conversationKey: quotedKey, role: .quotedMessage)
     }
     return quotedKey
   }

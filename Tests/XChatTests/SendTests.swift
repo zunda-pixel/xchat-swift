@@ -226,6 +226,44 @@ final class SendTests: XCTestCase {
     XCTAssertTrue(preview.embedsSourceEvent)
   }
 
+  /// A key that does not open the message a reply quotes is reported for
+  /// the quoted message, with the version it was given for: the reply's
+  /// own conversation key, or a key in `replyToConversationKeys`.
+  func testReplyNamesTheQuotedMessagesKey() throws {
+    let (core, _) = try makeCore(version: .v1)
+    let wrongKey = [UInt8](repeating: 1, count: 32)
+
+    XCTAssertThrowsError(
+      try core.encryptReply(
+        text: "a reply", replyToEventB64: TestVectors.string("event_message_b64"),
+        conversationId: Self.conversationId, conversationKey: wrongKey,
+        conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(
+            .quotedMessage, .authenticationFailed,
+            key: .conversationKey(version: Self.conversationKeyVersion))))
+    }
+
+    let quotedVersion = TestVectors.string("message_key_conversation_key_version")
+    XCTAssertThrowsError(
+      try core.encryptReply(
+        text: "a reply", replyToEventB64: TestVectors.string("event_message_key_b64"),
+        conversationId: Self.conversationId, conversationKey: Self.conversationKey,
+        conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId,
+        replyToConversationKeys: [quotedVersion: wrongKey])
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(
+          .messageContents(
+            .quotedMessage, .authenticationFailed,
+            key: .conversationKey(version: quotedVersion))))
+    }
+  }
+
   // MARK: Reactions and edits
 
   func testReactionRoundTrips() throws {

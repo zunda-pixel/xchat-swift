@@ -132,9 +132,6 @@ extension XChatError {
     case notEncrypted(MessageRole)
     /// The message event carries no contents.
     case noContents(MessageRole)
-    /// The message event carries no message id, which a per-message key
-    /// derives its attachments' keys from.
-    case noMessageId(MessageRole)
     /// The message event carries no sequence id.
     case noSequenceId(MessageRole)
     /// The key a reply carries for the message it quotes is not 32 bytes;
@@ -309,6 +306,9 @@ extension XChatError {
     /// A secretstream frame authenticated but carries a tag the format does
     /// not define; the value is that tag.
     case unknownStreamTag(UInt8)
+    /// A message's contents did not decrypt under `key`, the key the SDK
+    /// resolved for that message from the arguments.
+    case messageContents(MessageRole, ContentsFailure, key: ContentsKey)
     /// An encrypted file did not decrypt. `mediaHashKey` names the media
     /// when the file was opened as a message's media; it is nil for a file
     /// under a key the caller holds.
@@ -316,13 +316,40 @@ extension XChatError {
     /// A message is encrypted under a conversation-key version no key was
     /// given for. `available` lists the versions there were keys for,
     /// sorted.
-    case missingConversationKey(version: String, available: [String])
+    case missingConversationKey(MessageRole, version: String, available: [String])
+    /// The keys of a message with per-message keys derive from its event's
+    /// sender id and message id, and the event lacks one it needs.
+    case missingSenderOrMessageId(MessageRole)
     /// A per-message key derives from the sender id in decimal digits; the
     /// value is the sender id the event carries.
-    case nonNumericSenderId(String)
-    /// A per-message key derives from the event's sender id and message
-    /// id, and the event lacks one of them.
-    case missingSenderOrMessageId
+    case nonNumericSenderId(MessageRole, String)
+  }
+
+  /// Why a message's contents did not decrypt.
+  public enum ContentsFailure: Sendable, Hashable {
+    /// The contents did not authenticate: the key is not the one they
+    /// were encrypted under, or they are corrupted. Authenticated
+    /// encryption cannot tell the two apart.
+    case authenticationFailed
+    /// The contents are shorter than a nonce and tag, so they are no
+    /// encrypted contents.
+    case ciphertextTooShort
+    /// The key is not 32 bytes; the value is its length. Only a message
+    /// encrypted under its conversation key itself reports this: a
+    /// per-message key is derived to 32 bytes from a key of any length,
+    /// and then fails to authenticate.
+    case keyLength(Int)
+  }
+
+  /// Where the key a message's contents were opened with came from.
+  public enum ContentsKey: Sendable, Hashable {
+    /// The conversation key given for `version`, the version the message
+    /// is encrypted under, or the per-message key derived from it.
+    case conversationKey(version: String)
+    /// The per-message key a reply carries for the message it quotes, used
+    /// because no conversation key was given for `version`, the version
+    /// the quoted message is encrypted under.
+    case carriedByReply(version: String)
   }
 
   /// Why an encrypted file's bytes did not decrypt.

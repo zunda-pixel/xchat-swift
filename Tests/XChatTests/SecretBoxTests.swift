@@ -168,7 +168,7 @@ final class SecretBoxTests: XCTestCase {
     for length in [0, 1, 24, 39] {
       let truncated = [UInt8](repeating: 0, count: length)
       XCTAssertThrowsError(try decryptMessage(key: key, ciphertext: truncated)) { error in
-        XCTAssertEqual(error as? XChatError, .decryption(.ciphertextTooShort))
+        XCTAssertEqual((error as? ContentsError)?.failure, .ciphertextTooShort)
       }
     }
   }
@@ -185,7 +185,7 @@ final class SecretBoxTests: XCTestCase {
         XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(key.count)))
       }
       XCTAssertThrowsError(try decryptMessage(key: key, ciphertext: box)) { error in
-        XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(key.count)))
+        XCTAssertEqual((error as? ContentsError)?.failure, .keyLength(key.count))
       }
     }
   }
@@ -197,7 +197,7 @@ final class SecretBoxTests: XCTestCase {
     let box = try! encryptMessage(key: key, plaintext: message)
 
     XCTAssertThrowsError(try decryptMessage(key: otherKey, ciphertext: box)) { error in
-      XCTAssertEqual(error as? XChatError, .decryption(.authenticationFailed))
+      XCTAssertEqual((error as? ContentsError)?.failure, .authenticationFailed)
     }
   }
 }

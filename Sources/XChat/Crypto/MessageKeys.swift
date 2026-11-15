@@ -22,15 +22,14 @@ func usesMessageKey(_ contentsEncryptionVersion: Int?) -> Bool {
 /// Derives a message's 32-byte key from its conversation key, sender, and
 /// message id. The HKDF info is `<sender id>:<message id>` with the sender
 /// id in canonical decimal form, so a sender id that is not an integer has
-/// no message key.
+/// no message key: the result is nil, and the caller reports it with the
+/// message it was deriving for.
 func deriveMessageKey(
   conversationKey: [UInt8],
   senderId: String,
   messageId: String
-) throws -> [UInt8] {
-  guard let sender = Int64(senderId) else {
-    throw XChatError.decryption(.nonNumericSenderId(senderId))
-  }
+) throws -> [UInt8]? {
+  guard let sender = Int64(senderId) else { return nil }
   let info = "\(sender):\(messageId)"
   return try hkdfWithInfo(
     secret: conversationKey, salt: messageKeySalt, info: Array(info.utf8), length: 32)

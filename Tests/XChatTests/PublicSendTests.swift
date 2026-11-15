@@ -36,7 +36,7 @@ import XChat
   let conversationId = TestVectors.string("event_conversation_id")
   #expect(
     throws: XChatError.decryption(
-      .missingConversationKey(version: oldVersion, available: [newVersion]))
+      .missingConversationKey(.quotedMessage, version: oldVersion, available: [newVersion]))
   ) {
     try core.encryptReply(
       text: "after rotation", replyToEventB64: target, conversationId: conversationId,

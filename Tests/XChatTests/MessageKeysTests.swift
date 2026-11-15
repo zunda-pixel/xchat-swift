@@ -15,10 +15,11 @@ final class MessageKeysTests: XCTestCase {
       "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
     let messageId = "9d8c7b6a-5f4e-4d3c-8b2a-190807060504"
 
-    let messageKey = try deriveMessageKey(
-      conversationKey: conversationKey,
-      senderId: "1876543210987654321",
-      messageId: messageId)
+    let messageKey = try XCTUnwrap(
+      deriveMessageKey(
+        conversationKey: conversationKey,
+        senderId: "1876543210987654321",
+        messageId: messageId))
     XCTAssertEqual(
       Hex.encode(messageKey),
       "4d443b9a862e9584ccd0aee2753162aa7c5c1dbcb5f967610155f65ae41d8084")
@@ -42,8 +43,9 @@ final class MessageKeysTests: XCTestCase {
       "c3a1f0e2d4b6987a5c3e1f0d2b4a6987c3a1f0e2d4b6987a5c3e1f0d2b4a6987")
     let messageId = "00000000-0000-4000-8000-000000000001"
 
-    let messageKey = try deriveMessageKey(
-      conversationKey: conversationKey, senderId: "12", messageId: messageId)
+    let messageKey = try XCTUnwrap(
+      deriveMessageKey(
+        conversationKey: conversationKey, senderId: "12", messageId: messageId))
     XCTAssertEqual(
       Hex.encode(messageKey),
       "685bd4a20c7efb64c99147ab5854560c72eac9a826b04880b64e1951d4ef4cc7")
@@ -58,10 +60,11 @@ final class MessageKeysTests: XCTestCase {
   /// The reference's `attachment_key_for_message_id_matches_known_answer`.
   func testAttachmentKeyForMessageIdMatchesKnownAnswer() throws {
     let conversationKey = [UInt8](repeating: 7, count: 32)
-    let messageKey = try deriveMessageKey(
-      conversationKey: conversationKey,
-      senderId: "42",
-      messageId: "1975816253410000000")
+    let messageKey = try XCTUnwrap(
+      deriveMessageKey(
+        conversationKey: conversationKey,
+        senderId: "42",
+        messageId: "1975816253410000000"))
     let attachmentKey = try deriveAttachmentKey(
       messageKey: messageKey, attachmentId: "1975816253410000000")
     XCTAssertEqual(
@@ -80,15 +83,12 @@ final class MessageKeysTests: XCTestCase {
     XCTAssertEqual(canonical, padded)
   }
 
-  func testNonNumericSenderHasNoMessageKey() {
-    XCTAssertThrowsError(
+  func testNonNumericSenderHasNoMessageKey() throws {
+    XCTAssertNil(
       try deriveMessageKey(
         conversationKey: [UInt8](repeating: 1, count: 32),
         senderId: "sender-1",
-        messageId: "m")
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .decryption(.nonNumericSenderId("sender-1")))
-    }
+        messageId: "m"))
   }
 
   func testVersionOneOrMoreUsesAMessageKey() {

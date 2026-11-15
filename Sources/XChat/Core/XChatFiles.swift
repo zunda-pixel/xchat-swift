@@ -181,22 +181,26 @@ extension XChatCore {
       ? carriedMessageKey : nil
 
     let keys: AttachmentKeys
+    let source: XChatError.ContentsKey
     if let conversationKey = conversationKeys[version] {
       if let messageKey = try messageKeyFor(
-        event, create: create, conversationKey: conversationKey)
+        event, create: create, conversationKey: conversationKey, role: role)
       {
         keys = .message(key: messageKey, messageId: try requireMessageId(event, role))
       } else {
         keys = .conversation(conversationKey)
       }
+      source = .conversationKey(version: version)
     } else if let carried {
       guard carried.count == 32 else {
         throw XChatError.invalidInput(.carriedMessageKeyLength(carried.count))
       }
       keys = .message(key: carried, messageId: try requireMessageId(event, role))
+      source = .carriedByReply(version: version)
     } else {
       throw XChatError.decryption(
-        .missingConversationKey(version: version, available: conversationKeys.keys.sorted()))
+        .missingConversationKey(
+          role, version: version, available: conversationKeys.keys.sorted()))
     }
 
     guard let contents = create.contents else {
@@ -207,7 +211,7 @@ extension XChatCore {
     case .conversation(let key): contentsKey = key
     case .message(let key, _): contentsKey = key
     }
-    let plaintext = try decryptMessage(key: contentsKey, ciphertext: contents)
+    let plaintext = try decryptContents(contents, key: contentsKey, of: role, from: source)
     let holder = try readThrift(
       plaintext, as: XChatError.ParseFailure.messageContents, MessageEntryHolder.read)
     switch holder.contents {
@@ -302,11 +306,13 @@ extension XChatCore {
     }
   }
 
+  /// The message id a per-message key's attachments derive their keys
+  /// from; its absence fails like a message key's missing ids.
   private func requireMessageId(
     _ event: MessageEvent, _ role: XChatError.MessageRole
   ) throws -> String {
     guard let messageId = event.messageId else {
-      throw XChatError.invalidInput(.noMessageId(role))
+      throw XChatError.decryption(.missingSenderOrMessageId(role))
     }
     return messageId
   }

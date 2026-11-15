@@ -293,11 +293,13 @@ public final class XChatCore {
       let version = create.conversationKeyVersion ?? ""
       guard let conversationKey = keys[version] else {
         throw XChatError.decryption(
-          .missingConversationKey(version: version, available: keys.keys.sorted()))
+          .missingConversationKey(.message, version: version, available: keys.keys.sorted()))
       }
-      let messageKey = try messageKeyFor(parsed, create: create, conversationKey: conversationKey)
-      plaintext = try decryptMessage(
-        key: messageKey ?? conversationKey, ciphertext: contents)
+      let messageKey = try messageKeyFor(
+        parsed, create: create, conversationKey: conversationKey, role: .message)
+      plaintext = try decryptContents(
+        contents, key: messageKey ?? conversationKey, of: .message,
+        from: .conversationKey(version: version))
     }
 
     let content = try parseMessageContent(plaintext)
@@ -394,19 +396,37 @@ public final class XChatCore {
 
   /// The per-message key a v1 message uses, derived from its conversation
   /// key and the event's own sender and message id; nil for v0 messages.
+  /// `role` says which message errors are about.
   func messageKeyFor(
     _ parsed: MessageEvent,
     create: MessageCreateEvent,
-    conversationKey: [UInt8]
+    conversationKey: [UInt8],
+    role: XChatError.MessageRole
   ) throws -> [UInt8]? {
     guard usesMessageKey(create.contentsEncryptionVersion.map { Int($0) }) else {
       return nil
     }
-    guard let senderId = parsed.senderId, let messageId = parsed.messageId else {
-      throw XChatError.decryption(.missingSenderOrMessageId)
+    return try messageKey(of: parsed, conversationKey: conversationKey, role: role)
+  }
+
+  /// The per-message key of `event`, derived from `conversationKey` and the
+  /// event's sender id and message id. `role` says which message errors
+  /// are about.
+  func messageKey(
+    of event: MessageEvent,
+    conversationKey: [UInt8],
+    role: XChatError.MessageRole
+  ) throws -> [UInt8] {
+    guard let senderId = event.senderId, let messageId = event.messageId else {
+      throw XChatError.decryption(.missingSenderOrMessageId(role))
     }
-    return try deriveMessageKey(
-      conversationKey: conversationKey, senderId: senderId, messageId: messageId)
+    guard
+      let key = try deriveMessageKey(
+        conversationKey: conversationKey, senderId: senderId, messageId: messageId)
+    else {
+      throw XChatError.decryption(.nonNumericSenderId(role, senderId))
+    }
+    return key
   }
 
   /// Decrypts the conversation key a key change carries for this device,
