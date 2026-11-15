@@ -151,8 +151,8 @@ extension XChatError {
     /// message's own files, so there it lists only those. It is empty when
     /// there are none.
     ///
-    /// When a received reply's quoted message cannot be opened (no key was
-    /// given for it, it is not embedded, or it is not a text message),
+    /// When a received reply's quoted message cannot be opened (for
+    /// example, no key was given for it, or the reply does not embed it),
     /// `available` lists only the reply's own media: the media hash keys
     /// the reply's preview shows are written by the sender, not read from
     /// the quoted message. Passing one of those reports why the quoted
@@ -425,9 +425,9 @@ extension XChatError {
     /// over the signing key. A key whose binding does not verify (the
     /// signature does not match, `identityPublicKey` or
     /// `signingPublicKeySignature` is missing, or a key or the signature
-    /// does not decode) is not used, so when it is the only key at the
-    /// event's key version, the event is unverifiable as if no key had been
-    /// given. Such a binding may mean the key is not the sender's.
+    /// does not decode) is not used, so when it is the sender's only key at
+    /// the event's key version, the event is unverifiable as if no key had
+    /// been given. Such a binding may mean the key is not the sender's.
     case unverifiable(SignedEvent)
     /// An event's signature was checked and does not hold.
     case rejected(SignedEvent, SignatureFailure)

@@ -104,10 +104,11 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
 @Test func unverifiableNamesWhyTheSignatureWentUnchecked() {
   #expect(
     XChatError.verification(.unverifiable(.message)).description
-      == "Message signature could not be verified: the message is not encrypted (which is "
-      + "never verified), the event carries no signature, no signing key of its sender was "
-      + "given at its key version (a key given with an identity-key binding that does not "
-      + "verify is not used), or the signed payload cannot be rebuilt from the event")
+      == "Message signature could not be verified: the message is not encrypted (an "
+      + "unencrypted message is never verified), the event carries no signature, no signing "
+      + "key of its sender was given at its key version (a key given with an identity-key "
+      + "binding that does not verify is not used), or the signed payload cannot be rebuilt "
+      + "from the event")
   #expect(
     XChatError.verification(.unverifiable(.keyChange)).description
       == "KeyChange signature could not be verified: the event carries no signature, no "
