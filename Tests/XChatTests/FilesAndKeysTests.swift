@@ -367,6 +367,37 @@ final class FilesAndKeysTests: XCTestCase {
     }
   }
 
+  /// Without the quoted message's conversation key, its media opens only
+  /// through what the reply embeds: the quoted event, and a 32-byte key
+  /// for it.
+  func testQuotedMediaNeedsWhatTheReplyEmbeds() throws {
+    let core = XChatCore()
+    let mediaHashKey = TestVectors.string("media_first_hash_key")
+    let reply = try reply(
+      quoting: TestVectors.string("event_message_key_b64"),
+      quotedKeys: try Self.messageKeyMap())
+
+    let shortCarriedKey = try rewritingReply(reply.eventB64, keys: reply.keys) {
+      $0.replyingToPreview?.rawEventMessageKey = [UInt8](repeating: 1, count: 31)
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: shortCarriedKey, conversationKeys: reply.keys, mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.carriedMessageKeyLength(31)))
+    }
+
+    let notEmbedded = try rewritingReply(reply.eventB64, keys: reply.keys) {
+      $0.replyingToPreview?.rawEventMessageCreate = nil
+    }
+    XCTAssertThrowsError(
+      try core.decryptFile(
+        [], eventB64: notEmbedded, conversationKeys: reply.keys, mediaHashKey: mediaHashKey)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.quotedMessageNotEmbedded))
+    }
+  }
+
   // MARK: Outgoing files
 
   func testOutgoingFileRoundTrip() throws {
@@ -435,6 +466,34 @@ final class FilesAndKeysTests: XCTestCase {
       XCTAssertEqual(
         error as? XChatError,
         .invalidInput(.mediaHashKeyNotFound("nope", available: [mediaHashKey])))
+    }
+  }
+
+  /// An outgoing reply encrypts only its own files: media it quotes was
+  /// uploaded with the quoted message, and a reply without files has none
+  /// to name.
+  func testOutgoingReplyEncryptsOnlyItsOwnFiles() throws {
+    let core = XChatCore()
+    let reply = try reply(
+      quoting: TestVectors.string("event_message_key_b64"),
+      quotedKeys: try Self.messageKeyMap())
+    let (version, key) = try XCTUnwrap(reply.keys.first)
+
+    let quotedMedia = TestVectors.string("media_first_hash_key")
+    XCTAssertThrowsError(
+      try core.encryptFile(
+        [1], eventB64: reply.eventB64, conversationKey: key, conversationKeyVersion: version,
+        mediaHashKey: quotedMedia)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.quotedMediaHashKey(quotedMedia)))
+    }
+    XCTAssertThrowsError(
+      try core.encryptFile(
+        [1], eventB64: reply.eventB64, conversationKey: key, conversationKeyVersion: version,
+        mediaHashKey: "nope")
+    ) { error in
+      XCTAssertEqual(
+        error as? XChatError, .invalidInput(.mediaHashKeyNotFound("nope", available: [])))
     }
   }
 

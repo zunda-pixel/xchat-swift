@@ -264,6 +264,51 @@ final class SendTests: XCTestCase {
     }
   }
 
+  /// An event that cannot be quoted is reported by what it is, each a case
+  /// of its own for the quoted message: a key change, a message event
+  /// without contents or a sequence id, an edit, and a reaction.
+  func testReplyNamesWhyTheEventCannotBeQuoted() throws {
+    let (core, _) = try makeCore()
+    // A sent event has no sequence id until the server assigns one.
+    func sequenced(_ payload: EncryptedMessagePayload) throws -> String {
+      try rewritingEvent(payload.eventB64) { $0.sequenceId = "7" }
+    }
+    let message = try core.encryptMessage(
+      text: "quoted", conversationId: Self.conversationId,
+      conversationKey: Self.conversationKey,
+      conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+    let edit = try core.encryptEdit(
+      targetMessageSequenceId: "5", updatedText: "edited", targetMessageId: "m",
+      conversationId: Self.conversationId, conversationKey: Self.conversationKey,
+      conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+    let reaction = try core.encryptReaction(
+      emoji: "👍", targetMessageSequenceId: "5", conversationId: Self.conversationId,
+      conversationKey: Self.conversationKey,
+      conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
+
+    let events: [(name: String, eventB64: String, failure: XChatError.InputFailure)] = [
+      ("key change", TestVectors.string("event_key_change_b64"), .notMessageEvent(.quotedMessage)),
+      (
+        "no contents", try replacingContents(TestVectors.string("event_message_b64"), with: nil),
+        .noContents(.quotedMessage)
+      ),
+      ("no sequence id", message.eventB64, .noSequenceId(.quotedMessage)),
+      ("edit", try sequenced(edit), .messageIsEdit(.quotedMessage)),
+      ("reaction", try sequenced(reaction), .notTextMessage(.quotedMessage)),
+    ]
+    for (name, eventB64, failure) in events {
+      XCTAssertThrowsError(
+        try core.encryptReply(
+          text: "a reply", replyToEventB64: eventB64, conversationId: Self.conversationId,
+          conversationKey: Self.conversationKey,
+          conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId),
+        name
+      ) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(failure), name)
+      }
+    }
+  }
+
   /// A reply's own conversation key and version are reported as invalid
   /// parameters, not as the quoted message failing to open, whether the
   /// quoted message is under the conversation key itself (v0) or a key
