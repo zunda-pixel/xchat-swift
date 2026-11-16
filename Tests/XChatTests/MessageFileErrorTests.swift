@@ -568,6 +568,22 @@ struct MessageFileErrorTests {
   enum OwnKeyFault: CaseIterable {
     case keyOf31Bytes
     case versionWithALeadingZero
+
+    /// The key and version to pass for a message sent under `version`, and
+    /// the failure they are refused with.
+    func arguments(
+      forVersion version: String
+    ) -> (key: [UInt8], version: String, failure: XChatError.InputFailure) {
+      switch self {
+      case .keyOf31Bytes:
+        ([UInt8](repeating: 1, count: 31), version, .conversationKeyLength(31))
+      case .versionWithALeadingZero:
+        (
+          TestVectors.bytes("conversation_key_b64"), "0" + version,
+          .conversationKeyVersion("0" + version)
+        )
+      }
+    }
   }
 
   /// The conversation key and version an outgoing file's key derives from
@@ -580,19 +596,7 @@ struct MessageFileErrorTests {
     message: OutgoingFileMessage, fault: OwnKeyFault
   ) throws {
     let core = XChatCore()
-    let (key, version, failure): ([UInt8], String, XChatError.InputFailure) =
-      switch fault {
-      case .keyOf31Bytes:
-        (
-          [UInt8](repeating: 1, count: 31), message.conversationKeyVersion,
-          .conversationKeyLength(31)
-        )
-      case .versionWithALeadingZero:
-        (
-          TestVectors.bytes("conversation_key_b64"), "0" + message.conversationKeyVersion,
-          .conversationKeyVersion("0" + message.conversationKeyVersion)
-        )
-      }
+    let (key, version, failure) = fault.arguments(forVersion: message.conversationKeyVersion)
     #expect(throws: XChatError.invalidInput(failure), "encryptFile") {
       try core.encryptFile(
         [1], eventB64: message.eventB64, conversationKey: key, conversationKeyVersion: version,
@@ -602,6 +606,26 @@ struct MessageFileErrorTests {
       _ = try core.fileEncryptor(
         eventB64: message.eventB64, conversationKey: key, conversationKeyVersion: version,
         mediaHashKey: message.mediaHashKey)
+    }
+  }
+
+  /// The sender's own key and version are checked before the media hash
+  /// key too, as every send checks them before anything else it is given:
+  /// with an empty media hash key as well, the key or version is reported.
+  @Test(arguments: OwnKeyFault.allCases)
+  func outgoingFileChecksItsOwnKeyBeforeAnEmptyMediaHashKey(fault: OwnKeyFault) {
+    let core = XChatCore()
+    let message = OutgoingFileMessage.underMessageKey
+    let (key, version, failure) = fault.arguments(forVersion: message.conversationKeyVersion)
+    #expect(throws: XChatError.invalidInput(failure), "encryptFile") {
+      try core.encryptFile(
+        [1], eventB64: message.eventB64, conversationKey: key, conversationKeyVersion: version,
+        mediaHashKey: "")
+    }
+    #expect(throws: XChatError.invalidInput(failure), "fileEncryptor") {
+      _ = try core.fileEncryptor(
+        eventB64: message.eventB64, conversationKey: key, conversationKeyVersion: version,
+        mediaHashKey: "")
     }
   }
 }

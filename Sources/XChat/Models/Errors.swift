@@ -610,7 +610,10 @@ extension XChatError {
     case keyAgreementFailed
     /// Swift Crypto did not encrypt with AES-GCM for ECIES.
     case gcmEncryptionFailed
-    /// Swift Crypto did not sign with the loaded signing key.
+    /// Swift Crypto did not produce an ECDSA signature: with the loaded
+    /// signing key, for a send or a key change, or with a key
+    /// `generateKeypairs` generated, which signs each of its two public
+    /// keys with the other key before loading them.
     case signingFailed
     /// An error that is not an `XChatError` reached a result that holds
     /// only `XChatError`s; the value is that error's description. Nothing

@@ -104,7 +104,7 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
   let notFound = XChatError.invalidInput(.mediaHashKeyNotFound("h", available: ["a", "b"]))
   #expect(
     notFound.description
-      == "The media_hash_key 'h' is not among the media hash keys this call can use: a, b")
+      == "The media_hash_key 'h' is not among the media hash keys this call can use: 'a', 'b'")
   let noMedia = XChatError.invalidInput(.mediaHashKeyNotFound("h", available: []))
   #expect(
     noMedia.description
@@ -123,20 +123,20 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
 /// A missing conversation key lists the versions there were keys for,
 /// which in decryptEvents include those adopted from the batch's key
 /// changes, so the description does not say they were given. One version
-/// is named in the singular.
+/// is named in the singular, and each is quoted, as the missing one is.
 @Test func missingKeysListTheVersionsThereWereKeysFor() {
   let missingKey = XChatError.decryption(
     .missingConversationKey(.quotedMessage, version: "2", available: ["1", "3"]))
   #expect(
     missingKey.description
       == "The quoted message is encrypted under conversation-key version '2', and there was "
-      + "no key for it; there were keys for versions 1, 3")
+      + "no key for it; there were keys for versions '1', '3'")
   let oneKey = XChatError.decryption(
     .missingConversationKey(.quotedMessage, version: "2", available: ["1"]))
   #expect(
     oneKey.description
       == "The quoted message is encrypted under conversation-key version '2', and there was "
-      + "no key for it; there was a key for version 1")
+      + "no key for it; there was a key for version '1'")
   let noKeys = XChatError.decryption(
     .missingConversationKey(.message, version: "2", available: []))
   #expect(
@@ -145,9 +145,20 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
       + "conversation keys")
 }
 
+/// A participant whose identity key is refused is named by the user id the
+/// call was given, quoted as the other ids are.
+@Test func participantIdentityKeyQuotesTheUserId() {
+  #expect(
+    XChatError.invalidInput(.participantIdentityKey(userId: "2222")).description
+      == "The identity public key of participant '2222' is not the base64 of a P-256 public "
+      + "key in SEC1 or SPKI DER")
+}
+
 /// An unverifiable event is described with every reason its signature goes
 /// unchecked, including a given key whose identity binding does not
-/// verify; only a message is unverifiable for being unencrypted.
+/// verify; only a message is unverifiable for being unencrypted, and only
+/// a key change for a conversation key that is neither decrypted nor
+/// given, which its payload signs from signature version 6 on.
 @Test func unverifiableNamesWhyTheSignatureWentUnchecked() {
   #expect(
     XChatError.verification(.unverifiable(.message)).description
@@ -161,7 +172,9 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
       == "KeyChange signature could not be verified: the event carries no signature, no "
       + "signing key of its sender was given at its key version (a key given with an "
       + "identity-key binding that does not verify is not used), or the signed payload "
-      + "cannot be rebuilt from the event")
+      + "cannot be rebuilt from the event (from signature version 6 on, it signs the "
+      + "conversation key the event hands out, so it cannot be rebuilt when this device "
+      + "could not decrypt that key and none was given for its version)")
 }
 
 /// A message's contents that do not decrypt are described with the message

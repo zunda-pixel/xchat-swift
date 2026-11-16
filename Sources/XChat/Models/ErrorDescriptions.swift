@@ -12,7 +12,9 @@ public import Foundation
 /// write it. The case that holds it names what was read or checked, and
 /// the fragment does not repeat that ("Invalid base64 event: byte '!'
 /// (0x21) is not in the alphabet"). A count takes the singular for one
-/// ("1 character").
+/// ("1 character"). A string the call was given or the event holds (an id,
+/// a key version, a media hash key) is quoted, each one in a list too
+/// ("there were keys for versions '1', '3'").
 ///
 /// Only `XChatError` describes itself in English. Its nested enums print as
 /// Swift writes their cases, and its debug description is the expression
@@ -110,8 +112,8 @@ extension XChatError.InputFailure {
     case .participantKeyVersion(let value):
       "Invalid public_keys public_key_version '\(value)': \(keyVersionRule)"
     case .participantIdentityKey(let userId):
-      "The identity public key of participant \(userId) is not the base64 of a P-256 public "
-        + "key in SEC1 or SPKI DER"
+      "The identity public key of participant '\(userId)' is not the base64 of a P-256 "
+        + "public key in SEC1 or SPKI DER"
     case .conversationIdContainsComma(let value):
       "Invalid conversation_id '\(value)': must not contain a comma, which separates the "
         + "components of the signed payload"
@@ -161,7 +163,7 @@ extension XChatError.InputFailure {
     case .mediaHashKeyNotFound(let mediaHashKey, let available):
       "The media_hash_key '\(mediaHashKey)' is not among the media hash keys this call can "
         + "use: "
-        + available.joined(separator: ", ")
+        + quotedList(available)
     case .quotedMediaHashKey(let mediaHashKey):
       "The media_hash_key '\(mediaHashKey)' is media the reply quotes: its file belongs to "
         + "the quoted message and was uploaded with it, so there is nothing to encrypt"
@@ -301,6 +303,12 @@ extension XChatError.HexFailure {
   }
 }
 
+/// Values a call was given or an event holds, each quoted as a single one
+/// is (`'1', '3'`), so a list reads like the value it is compared with.
+private func quotedList(_ values: [String]) -> String {
+  values.map { "'\($0)'" }.joined(separator: ", ")
+}
+
 /// `count` and `noun`, in the plural unless the count is one: `1 byte`,
 /// `0 bytes`, `31 bytes`. Every noun passed takes an `s`.
 private func counted(_ count: Int, _ noun: String) -> String {
@@ -369,11 +377,11 @@ extension XChatError.DecryptionFailure {
         + "were no conversation keys"
     case .missingConversationKey(let role, let version, let available) where available.count == 1:
       "\(role.subject) is encrypted under conversation-key version '\(version)', and there "
-        + "was no key for it; there was a key for version \(available[0])"
+        + "was no key for it; there was a key for version '\(available[0])'"
     case .missingConversationKey(let role, let version, let available):
       "\(role.subject) is encrypted under conversation-key version '\(version)', and there "
         + "was no key for it; there were keys for versions "
-        + available.joined(separator: ", ")
+        + quotedList(available)
     case .missingSenderOrMessageId(let role):
       "\(role.subject) uses per-message keys, which derive from its event's sender id and "
         + "message id, and the event lacks one of them"
@@ -458,6 +466,10 @@ extension XChatError.VerificationFailure {
         + "the event carries no signature, no signing key of its sender was given at its key "
         + "version (a key given with an identity-key binding that does not verify is not "
         + "used), or the signed payload cannot be rebuilt from the event"
+        + (event == .keyChange
+          ? " (from signature version 6 on, it signs the conversation key the event hands "
+            + "out, so it cannot be rebuilt when this device could not decrypt that key and "
+            + "none was given for its version)" : "")
     case .rejected(let event, let failure):
       "\(event.name) signature verification failed: \(failure.explanation)"
     }

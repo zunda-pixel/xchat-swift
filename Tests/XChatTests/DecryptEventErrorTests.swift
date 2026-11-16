@@ -218,6 +218,25 @@ struct DecryptEventErrorTests {
     }
   }
 
+  /// The same key change, on a core that cannot decrypt its conversation
+  /// key and with no key given for its version (none, or only another
+  /// version's), leaves no payload to check: it is unverifiable under the
+  /// right signing key, from `decryptEvent` and `decryptEvents` alike.
+  @Test(arguments: [[:], ["1000": TestVectors.bytes("conversation_key_b64")]])
+  func aKeyChangeWhoseConversationKeyIsNeitherDecryptedNorGivenIsUnverifiable(
+    conversationKeys: [String: [UInt8]]
+  ) {
+    let keyChange = TestVectors.string("event_key_change_b64")
+    let unverifiable = XChatError.verification(.unverifiable(.keyChange))
+    #expect(throws: unverifiable) {
+      try XChatCore().decryptEvent(
+        keyChange, conversationKeys: conversationKeys, signingKeys: [Self.signingKey()])
+    }
+    let batch = XChatCore().decryptEvents(
+      [keyChange], conversationKeys: conversationKeys, signingKeys: [Self.signingKey()])
+    #expect(batch.errors == [0: unverifiable])
+  }
+
   /// The fixture's message with `signature` as its signature, decrypted
   /// with `signingKey` as the only signing key.
   private func decrypt(signature: String, signingKey: SigningKeyEntry) throws {
