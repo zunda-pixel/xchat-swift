@@ -332,8 +332,12 @@ extension XChatCore {
   }
 
   /// Encrypts and signs a send's contents with `signer`. The send has
-  /// taken the signer with `requireSigner`, then checked its key, version
-  /// and sender id with `requireSendParameters`, before anything else.
+  /// taken the signer with `requireSigner`, then checked its key, sender
+  /// id, version and conversation id with `requireSendParameters`, before
+  /// anything else. Both preconditions here rest on those checks: a v1
+  /// message key derives because the sender id is a user id, and the
+  /// signed payload builds because the conversation id, the only
+  /// component a caller passes that can hold a comma, holds none.
   private func encryptAndSign(
     contentBytes: [UInt8],
     signer: Signer,
@@ -360,7 +364,10 @@ extension XChatCore {
         let messageKey = deriveMessageKey(
           conversationKey: conversationKey, senderId: senderId, messageId: messageId)
       else {
-        throw XChatError.invalidInput(.senderId(senderId))
+        // Only a sender id `Int64(_:)` does not parse leaves the key
+        // underived, and `requireSendParameters` checked that it is a
+        // user id, which parses.
+        preconditionFailure("the sender id was checked to be a user id")
       }
       encrypted = try XChat.encryptMessage(key: messageKey, plaintext: contentBytes)
       contentsEncryptionVersion = Int16(sendContentsEncryptionVersion)
@@ -498,7 +505,7 @@ extension XChatCore {
   /// the call builds: the message a reply quotes, which would not be in
   /// the reply's conversation, or a key change's participants' keys.
   private func requireConversationId(_ conversationId: String) throws {
-    guard !conversationId.contains(",") else {
+    guard !containsComma(conversationId) else {
       throw XChatError.invalidInput(.conversationIdContainsComma(conversationId))
     }
   }

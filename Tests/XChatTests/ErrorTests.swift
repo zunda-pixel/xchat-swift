@@ -68,8 +68,9 @@ import XChat
     "XChatError.verification(.rejected(.keyChange, .signatureVersionTooOld(2, minimum: 7)))"
   ),
   (
-    .verification(.rejected(.message, .invalidSigningPublicKey(keyVersion: "1"))),
-    #"XChatError.verification(.rejected(.message, .invalidSigningPublicKey(keyVersion: "1")))"#
+    .verification(.rejected(.message, .invalidSigningPublicKey(senderId: "5", keyVersion: "1"))),
+    #"XChatError.verification(.rejected(.message, .invalidSigningPublicKey(senderId: "5", "#
+      + #"keyVersion: "1")))"#
   ),
   (
     .invalidInput(.conversationIdContainsComma("1,2")),
@@ -270,14 +271,14 @@ private let nestedFailureDescriptions: [(XChatError, String)] = [
       + "signature"
   ),
   (
-    .verification(.rejected(.message, .mismatch(keyVersion: "1"))),
+    .verification(.rejected(.message, .mismatch(senderId: "5", keyVersion: "1"))),
     "Message signature verification failed: the signature does not match the event under "
-      + "the signing key for key version '1'"
+      + "the signing key of sender '5' for key version '1'"
   ),
   (
-    .verification(.rejected(.keyChange, .invalidSigningPublicKey(keyVersion: "2"))),
-    "KeyChange signature verification failed: the signing key for key version '2' is not a "
-      + "P-256 public key"
+    .verification(.rejected(.keyChange, .invalidSigningPublicKey(senderId: "5", keyVersion: "2"))),
+    "KeyChange signature verification failed: the signing key of sender '5' for key version "
+      + "'2' is not a P-256 public key"
   ),
 ]
 
@@ -430,4 +431,138 @@ func kindsUseTheBindingsNames(error: XChatError, kind: String) {
     .parse(.event(.thrift(.fieldType(field: "id", id: 1, actual: .binary, expected: .i64)))),
   ]
   #expect(errors.count == 2)
+}
+
+/// A core that can send and prepare key changes, with the fixture's keys.
+private func sendingCore() throws -> XChatCore {
+  let core = XChatCore()
+  try core.importKeys(
+    identityPrivateKey: TestVectors.bytes("identity_private_b64"),
+    signingPrivateKey: TestVectors.bytes("signing_private_b64"),
+    publicKeyVersion: "1")
+  return core
+}
+
+/// Each of these is digits, or a sign and digits, and is still refused as
+/// a user id: zero is not positive, a leading zero or a sign is not
+/// canonical, and a value past `Int64.max` does not fit. The description
+/// states the whole rule, so it says which part the value breaks.
+@Test(arguments: ["0", "007", "+1", "9223372036854775808"])
+func userIdsAreDescribedByTheWholeRule(value: String) throws {
+  let rule =
+    "pass the user id as a positive integer that fits in an Int64, in decimal digits with no "
+    + "sign or leading zero"
+  let core = try sendingCore()
+  let sender = #expect(throws: XChatError.invalidInput(.senderId(value))) {
+    try core.encryptMessage(
+      text: "x", conversationId: "1111:2222", conversationKey: [UInt8](repeating: 1, count: 32),
+      conversationKeyVersion: "1", senderId: value)
+  }
+  #expect(sender?.description == "Invalid sender_id '\(value)': \(rule)")
+  let participant = #expect(throws: XChatError.invalidInput(.participantUserId(value))) {
+    try core.prepareConversationKeyChange(
+      participants: [
+        ConversationParticipantPublicKey(
+          userId: value, identityPublicKey: TestVectors.string("identity_public_b64"),
+          publicKeyVersion: "1")
+      ],
+      conversationId: "1111:2222", senderId: "1111", conversationKeyVersion: "2")
+  }
+  #expect(participant?.description == "Invalid public_keys user_id '\(value)': \(rule)")
+}
+
+/// Each of these is refused as a key version, though most are an integer
+/// in digits: a leading zero or a sign is not canonical, a negative value
+/// is no version, and a value past `Int64.max` does not fit. The
+/// description states the whole rule for every version a call takes.
+@Test(arguments: ["01", "00", "+1", "-1", "9223372036854775808"])
+func keyVersionsAreDescribedByTheWholeRule(value: String) throws {
+  let rule =
+    "pass the key version as the X API returns it, a non-negative integer that fits in an "
+    + "Int64, in decimal digits with no sign or leading zero (zero is '0')"
+  let core = try sendingCore()
+  let conversation = #expect(throws: XChatError.invalidInput(.conversationKeyVersion(value))) {
+    try core.encryptMessage(
+      text: "x", conversationId: "1111:2222", conversationKey: [UInt8](repeating: 1, count: 32),
+      conversationKeyVersion: value, senderId: "1111")
+  }
+  #expect(conversation?.description == "Invalid conversation_key_version '\(value)': \(rule)")
+  let participant = #expect(throws: XChatError.invalidInput(.participantKeyVersion(value))) {
+    try core.prepareConversationKeyChange(
+      participants: [
+        ConversationParticipantPublicKey(
+          userId: "2222", identityPublicKey: TestVectors.string("identity_public_b64"),
+          publicKeyVersion: value)
+      ],
+      conversationId: "1111:2222", senderId: "1111", conversationKeyVersion: "2")
+  }
+  #expect(
+    participant?.description == "Invalid public_keys public_key_version '\(value)': \(rule)")
+  let publicKey = #expect(throws: XChatError.invalidInput(.publicKeyVersion(value))) {
+    try core.setPublicKeyVersion(value)
+  }
+  #expect(publicKey?.description == "Invalid public key version '\(value)': \(rule)")
+}
+
+/// Zero, written "0", is a key version, as the description says, though
+/// it is no user id.
+@Test func zeroIsAKeyVersion() throws {
+  let core = try sendingCore()
+  try core.setPublicKeyVersion("0")
+  let payload = try core.encryptMessage(
+    text: "x", conversationId: "1111:2222", conversationKey: [UInt8](repeating: 1, count: 32),
+    conversationKeyVersion: "0", senderId: "1111")
+  #expect(payload.conversationKeyVersion == "0")
+}
+
+/// A rejected signature names the key it was checked under by the event's
+/// sender and key version, the `userId` and `publicKeyVersion` of the
+/// `SigningKeyEntry` to replace: a batch holds several senders' events,
+/// and `decryptEvents` returns only the index of one that fails.
+@Test func rejectedSignaturesNameTheSenderOfTheKey() throws {
+  let sender = TestVectors.string("event_sender_id")
+  let otherSender = TestVectors.string("message_key_sender_id")
+  let keyVersion = TestVectors.string("event_signing_key_version")
+  let events = [
+    TestVectors.string("event_message_b64"), TestVectors.string("event_message_key_b64"),
+  ]
+  let keys = [
+    TestVectors.string("event_conversation_key_version"): TestVectors.bytes(
+      "conversation_key_b64"),
+    TestVectors.string("message_key_conversation_key_version"): try Hex.decode(
+      TestVectors.string("message_key_conversation_key_hex")),
+  ]
+  func decrypt(senderKey: String, otherSenderKey: String) -> DecryptEventsResult {
+    XChatCore().decryptEvents(
+      events, conversationKeys: keys,
+      signingKeys: [
+        SigningKeyEntry(userId: sender, publicKeyVersion: keyVersion, publicKey: senderKey),
+        SigningKeyEntry(
+          userId: otherSender, publicKeyVersion: keyVersion, publicKey: otherSenderKey),
+      ])
+  }
+  let signingKey = TestVectors.string("signing_public_b64")
+  // A P-256 public key, but not the one that signed.
+  let otherKey = TestVectors.string("identity_public_b64")
+  let notAKey = Base64.encodeStandard([0x04] + [UInt8](repeating: 0, count: 64))
+
+  let verified = decrypt(senderKey: signingKey, otherSenderKey: signingKey)
+  #expect(verified.errors.isEmpty)
+  #expect(verified.events.count == 2)
+
+  let mismatch = decrypt(senderKey: signingKey, otherSenderKey: otherKey)
+  #expect(
+    mismatch.errors == [
+      1: .verification(
+        .rejected(.message, .mismatch(senderId: otherSender, keyVersion: keyVersion)))
+    ])
+  #expect(mismatch.events.count == 1)
+
+  let invalidKey = decrypt(senderKey: notAKey, otherSenderKey: signingKey)
+  #expect(
+    invalidKey.errors == [
+      0: .verification(
+        .rejected(.message, .invalidSigningPublicKey(senderId: sender, keyVersion: keyVersion)))
+    ])
+  #expect(invalidKey.events.count == 1)
 }

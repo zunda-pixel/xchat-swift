@@ -89,33 +89,37 @@ extension XChatError {
     /// in `[1, n-1]`; the value says which of the two keys it is.
     case privateKey(KeyPurpose)
 
-    // Ids and versions, with the value that was passed
+    // Ids and versions, with the value that was passed. Canonical decimal
+    // form is digits with no sign or leading zero, and zero is "0".
 
-    /// A public key version is not a non-negative integer in canonical
-    /// decimal form, as the X API returns it.
+    /// A public key version is not a non-negative integer that fits in an
+    /// `Int64`, in canonical decimal form, as the X API returns it.
     case publicKeyVersion(String)
-    /// `sender_id` is not a positive integer in canonical decimal form.
-    case senderId(String)
-    /// `conversation_key_version` is not a non-negative integer in
-    /// canonical decimal form, as the X API returns it.
-    case conversationKeyVersion(String)
-    /// A participant's user id is not a positive integer in canonical
-    /// decimal form.
-    case participantUserId(String)
-    /// A participant's public key version is not a non-negative integer in
+    /// `sender_id` is not a positive integer that fits in an `Int64`, in
     /// canonical decimal form.
+    case senderId(String)
+    /// `conversation_key_version` is not a non-negative integer that fits
+    /// in an `Int64`, in canonical decimal form, as the X API returns it.
+    case conversationKeyVersion(String)
+    /// A participant's user id is not a positive integer that fits in an
+    /// `Int64`, in canonical decimal form.
+    case participantUserId(String)
+    /// A participant's public key version is not a non-negative integer
+    /// that fits in an `Int64`, in canonical decimal form.
     case participantKeyVersion(String)
     /// The identity public key of the participant `userId` is not the
     /// base64 of a P-256 public key in compressed SEC1, uncompressed SEC1,
     /// or canonical SPKI DER.
     case participantIdentityKey(userId: String)
-    /// The conversation id contains a comma. The signature covers the
-    /// conversation id among other components joined with commas, so a
-    /// comma would make the signed payload ambiguous. The other components
-    /// are ids and versions in canonical decimal form, a message id the SDK
-    /// mints, and base64, so the conversation id is the only one that can
-    /// hold a comma. Sends and key changes check it with their other ids
-    /// and versions, before what they build.
+    /// The conversation id contains a comma (U+002C), including one a
+    /// combining mark follows, which Swift counts as part of a `Character`
+    /// that is not `","`. The signature covers the conversation id among
+    /// other components joined with commas, so a comma would make the
+    /// signed payload ambiguous. The other components are ids and versions
+    /// in canonical decimal form, a message id the SDK mints, and base64,
+    /// so the conversation id is the only one that can hold a comma. Sends
+    /// and key changes check it with their other ids and versions, before
+    /// what they build.
     case conversationIdContainsComma(String)
 
     // Building events
@@ -540,6 +544,14 @@ extension XChatError {
   /// event: one that is not a P-256 public key fails its binding and is
   /// not used, so an event only it could verify is
   /// `VerificationFailure.unverifiable`, not `invalidSigningPublicKey`.
+  ///
+  /// `mismatch` and `invalidSigningPublicKey` name the key they were
+  /// checked under as `SigningKeyEntry` does: `senderId` is the event's
+  /// sender, the entry's `userId`, and `keyVersion` the key version its
+  /// signature names, the entry's `publicKeyVersion`. A caller can replace
+  /// that entry from the error alone: an event that fails is not returned,
+  /// `decryptEvents` gives only its index among events of several senders,
+  /// and no call reads the sender of an event that does not decrypt.
   public enum SignatureFailure: Sendable, Hashable {
     /// The signature's version is missing or not an integer.
     case missingSignatureVersion
@@ -548,15 +560,17 @@ extension XChatError {
     /// The signature's version is above the highest one supported.
     case signatureVersionUnsupported(Int32, maximum: Int32)
     /// The signature does not match the payload rebuilt from the event,
-    /// under the signing key at `keyVersion`.
-    case mismatch(keyVersion: String)
+    /// under the signing key of `senderId`, the event's sender, at
+    /// `keyVersion`.
+    case mismatch(senderId: String, keyVersion: String)
     /// The signature is not a raw 64-byte `r || s` ECDSA P-256 signature.
     case malformedSignature
-    /// The signing key at `keyVersion`, the event's key version, is not a
-    /// P-256 public key. It was given without an identity-key binding: one
-    /// given with a binding that is not a P-256 public key is not used, as
-    /// the enum's documentation says.
-    case invalidSigningPublicKey(keyVersion: String)
+    /// The signing key of `senderId`, the event's sender, at `keyVersion`,
+    /// the event's key version, is not a P-256 public key. It was given
+    /// without an identity-key binding: one given with a binding that is
+    /// not a P-256 public key is not used, as the enum's documentation
+    /// says.
+    case invalidSigningPublicKey(senderId: String, keyVersion: String)
   }
 }
 

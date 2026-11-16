@@ -100,18 +100,15 @@ extension XChatError.InputFailure {
     case .privateKey(let purpose):
       "Invalid \(purpose.name) private key: not a P-256 scalar"
     case .publicKeyVersion(let version):
-      "Invalid public key version '\(version)': pass the key version as the X API "
-        + "returns it, an integer in digits"
+      "Invalid public key version '\(version)': \(keyVersionRule)"
     case .senderId(let value):
-      "Invalid sender_id '\(value)': pass a numeric user id (digits only)"
+      "Invalid sender_id '\(value)': \(userIdRule)"
     case .conversationKeyVersion(let value):
-      "Invalid conversation_key_version '\(value)': pass the key version as the X API "
-        + "returns it, an integer in digits"
+      "Invalid conversation_key_version '\(value)': \(keyVersionRule)"
     case .participantUserId(let value):
-      "Invalid public_keys user_id '\(value)': pass a numeric user id (digits only)"
+      "Invalid public_keys user_id '\(value)': \(userIdRule)"
     case .participantKeyVersion(let value):
-      "Invalid public_keys public_key_version '\(value)': pass the key version as the X "
-        + "API returns it, an integer in digits"
+      "Invalid public_keys public_key_version '\(value)': \(keyVersionRule)"
     case .participantIdentityKey(let userId):
       "The identity public key of participant \(userId) is not the base64 of a P-256 public "
         + "key in SEC1 or SPKI DER"
@@ -173,6 +170,20 @@ extension XChatError.InputFailure {
     }
   }
 }
+
+/// What a user id must be, as `isUserId` checks it. The whole rule is
+/// stated, so each value refused breaks a part of it a reader can see:
+/// `0` is not positive, `007` has a leading zero, `+1` a sign, and
+/// `9223372036854775808` does not fit.
+private let userIdRule =
+  "pass the user id as a positive integer that fits in an Int64, in decimal digits with no "
+  + "sign or leading zero"
+
+/// What a key version must be, as `isKeyVersion` checks it: the rule of a
+/// user id, but zero, written `0`, is a version too.
+private let keyVersionRule =
+  "pass the key version as the X API returns it, a non-negative integer that fits in an "
+  + "Int64, in decimal digits with no sign or leading zero (zero is '0')"
 
 extension XChatError.AttachmentFailure {
   var explanation: String {
@@ -470,13 +481,14 @@ extension XChatError.SignatureFailure {
       "signature_version \(version) is no longer accepted (minimum: \(minimum))"
     case .signatureVersionUnsupported(let version, let maximum):
       "signature_version \(version) is not supported (maximum: \(maximum))"
-    case .mismatch(let keyVersion):
-      "the signature does not match the event under the signing key for key version "
-        + "'\(keyVersion)'"
+    case .mismatch(let senderId, let keyVersion):
+      "the signature does not match the event under the signing key of sender "
+        + "'\(senderId)' for key version '\(keyVersion)'"
     case .malformedSignature:
       "the signature is not a 64-byte ECDSA P-256 signature"
-    case .invalidSigningPublicKey(let keyVersion):
-      "the signing key for key version '\(keyVersion)' is not a P-256 public key"
+    case .invalidSigningPublicKey(let senderId, let keyVersion):
+      "the signing key of sender '\(senderId)' for key version '\(keyVersion)' is not a "
+        + "P-256 public key"
     }
   }
 }

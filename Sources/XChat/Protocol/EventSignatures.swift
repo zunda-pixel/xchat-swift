@@ -168,12 +168,26 @@ private func componentPayload(
   var parts = [eventName, messageId, senderId]
   if let conversationId { parts.append(conversationId) }
   parts.append(contentsOf: additional)
-  if parts.contains(where: { $0.contains(",") }) { return nil }
+  if parts.contains(where: containsComma) { return nil }
   return parts.joined(separator: ",")
+}
+
+/// Whether `component` would put a comma byte into the signed payload, the
+/// one check both the payload and the sends that refuse a conversation id
+/// make, so a send refuses every id its payload could not be built from.
+///
+/// It looks at the UTF-8, not at the characters: a comma followed by a
+/// combining mark (`",\u{301}"`) is one `Character` that is not `","`, so
+/// `String.contains(",")` does not find it, while the bytes signed still
+/// hold the comma.
+func containsComma(_ component: String) -> Bool {
+  component.utf8.contains(UInt8(ascii: ","))
 }
 
 /// Checks an event's signature against the known signing keys.
 ///
+/// `signingKeys` are the event's sender's, so a rejection names the key by
+/// the event's sender id and the key version, as `SigningKeyEntry` does.
 /// The key is chosen by the `public_key_version` the event's signature
 /// names; the payload is rebuilt from the event in its signature version's
 /// layout, so a signature the reference produced verifies here without any
@@ -202,7 +216,9 @@ func checkEventSignature(
   guard let entry = signingKeys.first(where: { $0.publicKeyVersion == keyVersion }) else {
     return .unverifiable
   }
-  guard
+  // The payload signs the sender id, so requiring it here to name the key
+  // leaves no more events unverifiable.
+  guard let senderId = event.senderId,
     let payload = eventSignaturePayload(
       event: event, detail: detail,
       plaintextConversationKeyB64: plaintextConversationKeyB64)
@@ -216,13 +232,13 @@ func checkEventSignature(
     {
       return .verified
     }
-    return .failed(.mismatch(keyVersion: keyVersion))
+    return .failed(.mismatch(senderId: senderId, keyVersion: keyVersion))
   } catch PrimitiveError.malformedSignature {
     return .failed(.malformedSignature)
   } catch {
     // Everything else `verify` and the base64 decoding throw is about the
     // signing key: it is not base64, or not a P-256 public key.
-    return .failed(.invalidSigningPublicKey(keyVersion: keyVersion))
+    return .failed(.invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion))
   }
 }
 

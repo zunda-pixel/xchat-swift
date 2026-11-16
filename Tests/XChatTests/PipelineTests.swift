@@ -375,8 +375,8 @@ final class PipelineTests: XCTestCase {
     let keys = ["1001": TestVectors.bytes("conversation_key_b64")]
 
     let rejections: [(SigningKeyEntry, XChatError.SignatureFailure)] = [
-      (otherKey, .mismatch(keyVersion: keyVersion)),
-      (notAKey, .invalidSigningPublicKey(keyVersion: keyVersion)),
+      (otherKey, .mismatch(senderId: senderId, keyVersion: keyVersion)),
+      (notAKey, .invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion)),
     ]
     for (signingKey, failure) in rejections {
       XCTAssertThrowsError(
@@ -403,7 +403,11 @@ final class PipelineTests: XCTestCase {
       [TestVectors.string("event_key_change_b64")], signingKeys: [notAKey])
     XCTAssertEqual(
       batch.errors,
-      [0: .verification(.rejected(.keyChange, .invalidSigningPublicKey(keyVersion: keyVersion)))])
+      [
+        0: .verification(
+          .rejected(
+            .keyChange, .invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion)))
+      ])
   }
 
   /// When both the signing key and the signature are malformed, the key is
@@ -439,7 +443,9 @@ final class PipelineTests: XCTestCase {
         ) { error in
           XCTAssertEqual(
             error as? XChatError,
-            .verification(.rejected(.message, .invalidSigningPublicKey(keyVersion: keyVersion))),
+            .verification(
+              .rejected(
+                .message, .invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion))),
             name)
         }
       }
@@ -886,7 +892,9 @@ final class PipelineTests: XCTestCase {
       ) { error in
         XCTAssertEqual(
           error as? XChatError,
-          .verification(.rejected(.message, .invalidSigningPublicKey(keyVersion: keyVersion))),
+          .verification(
+            .rejected(
+              .message, .invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion))),
           badKey)
       }
       XCTAssertThrowsError(

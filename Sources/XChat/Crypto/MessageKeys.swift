@@ -24,8 +24,10 @@ func usesMessageKey(_ contentsEncryptionVersion: Int?) -> Bool {
 /// id in canonical decimal form, so a signed or zero-padded id derives the
 /// same key as its canonical form, and an id `Int64(_:)` does not parse
 /// (anything but decimal digits after an optional sign, or a value out of
-/// range) has no message key: the result is nil, and the caller reports
-/// it with the message it was deriving for.
+/// range) has no message key: the result is nil. Opening a message reports
+/// that as `nonNumericSenderId` with the message's role, validating a
+/// reply's preview takes it as a quoted message that does not open, and a
+/// send, which checked its sender id first, never gets it.
 func deriveMessageKey(
   conversationKey: [UInt8],
   senderId: String,
