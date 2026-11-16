@@ -51,7 +51,9 @@ public struct UrlAttachmentImageDescriptor: Sendable, Equatable {
 public enum AttachmentDescriptor: Sendable, Equatable {
   /// A media attachment: an encrypted file the message references by its
   /// media hash key. `filesizeBytes` is the encrypted size
-  /// (`encryptedFileSize`), which must be positive.
+  /// (`encryptedFileSize`), which must be positive. `plaintextSHA256`, when
+  /// given, is the base64 SHA-256 of the file's plaintext; an empty one is
+  /// taken as not given.
   case media(
     mediaHashKey: String,
     width: Int64,

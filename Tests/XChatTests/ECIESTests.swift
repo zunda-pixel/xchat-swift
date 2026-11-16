@@ -12,17 +12,20 @@ final class ECIESTests: XCTestCase {
     XCTAssertEqual(pair.publicKey[0], 0x04)
     XCTAssertEqual(pair.privateKey.count, 32)
     XCTAssertTrue(isValidPublicKey(pair.publicKey))
-    XCTAssertEqual(try derivePublicKey(privateKey: pair.privateKey), pair.publicKey)
+    XCTAssertEqual(
+      try derivePublicKey(privateKey: pair.privateKey, purpose: .identity), pair.publicKey)
   }
 
   /// Deriving public keys from the vectors' private keys reproduces the
   /// vectors' SEC1 public keys, so the encoding matches the reference.
   func testVectorPrivateKeysDeriveTheirPublicKeys() throws {
     XCTAssertEqual(
-      try derivePublicKey(privateKey: TestVectors.bytes("identity_private_b64")),
+      try derivePublicKey(
+        privateKey: TestVectors.bytes("identity_private_b64"), purpose: .identity),
       TestVectors.bytes("identity_public_b64"))
     XCTAssertEqual(
-      try derivePublicKey(privateKey: TestVectors.bytes("signing_private_b64")),
+      try derivePublicKey(
+        privateKey: TestVectors.bytes("signing_private_b64"), purpose: .signing),
       TestVectors.bytes("signing_public_b64"))
   }
 
@@ -64,10 +67,7 @@ final class ECIESTests: XCTestCase {
     XCTAssertThrowsError(
       try decryptWithPrivateKey(privateKey: second.privateKey, data: ciphertext)
     ) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, .decryption)
-      XCTAssertEqual(
-        error?.message, "Decryption failed - invalid key or corrupted data")
+      XCTAssertEqual(error as? PrimitiveError, .authenticationFailed)
     }
   }
 
@@ -81,7 +81,7 @@ final class ECIESTests: XCTestCase {
     XCTAssertThrowsError(
       try decryptWithPrivateKey(privateKey: pair.privateKey, data: body)
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .decryption)
+      XCTAssertEqual(error as? PrimitiveError, .authenticationFailed)
     }
 
     // The authentication tag.
@@ -90,16 +90,16 @@ final class ECIESTests: XCTestCase {
     XCTAssertThrowsError(
       try decryptWithPrivateKey(privateKey: pair.privateKey, data: tag)
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .decryption)
+      XCTAssertEqual(error as? PrimitiveError, .authenticationFailed)
     }
 
-    // The ephemeral public key prefix.
+    // The ephemeral public key prefix, leaving no point.
     var prefix = ciphertext
     prefix[0] = 0x00
     XCTAssertThrowsError(
       try decryptWithPrivateKey(privateKey: pair.privateKey, data: prefix)
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(error as? PrimitiveError, .authenticationFailed)
     }
   }
 
@@ -111,9 +111,7 @@ final class ECIESTests: XCTestCase {
           privateKey: pair.privateKey,
           data: [UInt8](repeating: 0, count: length))
       ) { error in
-        let error = error as? XChatError
-        XCTAssertEqual(error?.kind, .decryption)
-        XCTAssertEqual(error?.message, "Data too short")
+        XCTAssertEqual(error as? PrimitiveError, .ciphertextTooShort)
       }
     }
   }
@@ -126,12 +124,13 @@ final class ECIESTests: XCTestCase {
       XCTAssertThrowsError(
         try decryptWithPrivateKey(privateKey: key, data: ciphertext)
       ) { error in
-        XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+        XCTAssertEqual(error as? XChatError, .invalidInput(.privateKey(.identity)))
       }
     }
-    XCTAssertThrowsError(try derivePublicKey(privateKey: [UInt8](repeating: 0, count: 32))) {
-      error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+    XCTAssertThrowsError(
+      try derivePublicKey(privateKey: [UInt8](repeating: 0, count: 32), purpose: .signing)
+    ) { error in
+      XCTAssertEqual(error as? XChatError, .invalidInput(.privateKey(.signing)))
     }
   }
 
@@ -140,7 +139,7 @@ final class ECIESTests: XCTestCase {
     let offCurve = [0x04] + [UInt8](repeating: 0, count: 64)
     XCTAssertFalse(isValidPublicKey(offCurve))
     XCTAssertThrowsError(try encryptWithPublicKey(publicKey: offCurve, data: [1])) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(error as? PrimitiveError, .invalidPublicKey)
     }
     // Wrong length.
     XCTAssertFalse(isValidPublicKey([UInt8](repeating: 1, count: 32)))
@@ -190,9 +189,7 @@ final class ECIESTests: XCTestCase {
           signature: [UInt8](repeating: 0, count: length),
           payload: [1])
       ) { error in
-        let error = error as? XChatError
-        XCTAssertEqual(error?.kind, .verification)
-        XCTAssertEqual(error?.message, "Invalid signature length")
+        XCTAssertEqual(error as? PrimitiveError, .malformedSignature)
       }
     }
   }

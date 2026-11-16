@@ -21,9 +21,9 @@ final class EventModelTests: XCTestCase {
   }
 
   private func messageCreate(_ event: MessageEvent) throws -> MessageCreateEvent {
-    guard case .messageCreate(let create) = try XCTUnwrap(event.detail) else {
-      XCTFail("expected a message-create detail")
-      throw XChatError.parse("not a message-create detail")
+    let detail = try XCTUnwrap(event.detail)
+    guard case .messageCreate(let create) = detail else {
+      return try XCTUnwrap(nil, "expected a message-create detail, got \(detail)")
     }
     return create
   }
@@ -73,11 +73,12 @@ final class EventModelTests: XCTestCase {
       create.conversationKeyVersion,
       TestVectors.string("message_key_conversation_key_version"))
 
-    let messageKey = try deriveMessageKey(
-      conversationKey: try Hex.decode(
-        TestVectors.string("message_key_conversation_key_hex")),
-      senderId: try XCTUnwrap(event.senderId),
-      messageId: try XCTUnwrap(event.messageId))
+    let messageKey = try XCTUnwrap(
+      deriveMessageKey(
+        conversationKey: try Hex.decode(
+          TestVectors.string("message_key_conversation_key_hex")),
+        senderId: try XCTUnwrap(event.senderId),
+        messageId: try XCTUnwrap(event.messageId)))
     XCTAssertEqual(event.senderId, TestVectors.string("message_key_sender_id"))
     XCTAssertEqual(
       Hex.encode(messageKey),
@@ -95,11 +96,12 @@ final class EventModelTests: XCTestCase {
     let create = try messageCreate(event)
     XCTAssertEqual(create.contentsEncryptionVersion, 1)
 
-    let messageKey = try deriveMessageKey(
-      conversationKey: try Hex.decode(
-        TestVectors.string("message_key_short_conversation_key_hex")),
-      senderId: try XCTUnwrap(event.senderId),
-      messageId: try XCTUnwrap(event.messageId))
+    let messageKey = try XCTUnwrap(
+      deriveMessageKey(
+        conversationKey: try Hex.decode(
+          TestVectors.string("message_key_short_conversation_key_hex")),
+        senderId: try XCTUnwrap(event.senderId),
+        messageId: try XCTUnwrap(event.messageId)))
     XCTAssertEqual(event.senderId, TestVectors.string("message_key_short_sender_id"))
 
     let plaintext = try decryptMessage(

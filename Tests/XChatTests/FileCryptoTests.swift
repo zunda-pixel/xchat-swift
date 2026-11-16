@@ -12,20 +12,30 @@ final class FileCryptoTests: XCTestCase {
   private static let vectorCiphertext = TestVectors.bytes("media_conversation_key_encrypted_b64")
   private static let vectorPlaintext = TestVectors.bytes("media_conversation_key_plaintext_b64")
 
-  /// Asserts the closure throws an `XChatError` with the given kind and
-  /// exact message.
+  /// Asserts the closure throws `expected`.
   private func assertThrows<T>(
-    _ expectedMessage: String,
-    kind: ErrorKind = .decryption,
+    _ expected: XChatError,
+    _ message: @autoclosure () -> String = "",
     file: StaticString = #filePath,
     line: UInt = #line,
     _ body: () throws -> T
   ) {
-    XCTAssertThrowsError(try body(), file: file, line: line) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, kind, file: file, line: line)
-      XCTAssertEqual(error?.message, expectedMessage, file: file, line: line)
+    XCTAssertThrowsError(try body(), message(), file: file, line: line) { error in
+      XCTAssertEqual(error as? XChatError, expected, message(), file: file, line: line)
     }
+  }
+
+  /// Asserts the closure throws `fault` for a file under a key the caller
+  /// holds.
+  private func assertThrows<T>(
+    _ fault: XChatError.FileFailure,
+    _ message: @autoclosure () -> String = "",
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ body: () throws -> T
+  ) {
+    assertThrows(
+      .decryption(.file(fault, mediaHashKey: nil)), message(), file: file, line: line, body)
   }
 
   // MARK: Cross-binding vector
@@ -60,8 +70,8 @@ final class FileCryptoTests: XCTestCase {
     XCTAssertEqual(chunkedPlaintext, Self.vectorPlaintext)
   }
 
-  /// `decryptMedia` names the media in failures and decrypts the vector
-  /// the same way `decryptFile` does.
+  /// `decryptMedia` decrypts the vector the same way `decryptFile` does;
+  /// only its failures differ, by carrying the media hash key.
   func testDecryptMediaVector() throws {
     XCTAssertEqual(
       try decryptMedia(
@@ -161,32 +171,28 @@ final class FileCryptoTests: XCTestCase {
   /// Dropping the final frame is detected as truncation.
   func testMissingFinalFrameRejected() throws {
     let truncated = Array(Self.vectorCiphertext[0..<(Self.vectorCiphertext.count - 493)])
-    assertThrows("stream truncated: ended before final frame") {
+    assertThrows(.truncated) {
       try decryptFile(key: Self.key, ciphertext: truncated)
     }
   }
 
-  /// Cutting inside the final frame fails its MAC, which is reported as a
-  /// pull failure rather than a clean truncation.
+  /// Cutting inside the final frame fails its MAC, which cannot be told
+  /// from tampering, so it is reported as the last frame failing rather
+  /// than as a clean truncation.
   func testCutInsideFinalFrameRejected() throws {
     let truncated = Array(Self.vectorCiphertext[0..<(Self.vectorCiphertext.count - 10)])
-    assertThrows("secretstream pull failed") {
+    assertThrows(.lastFrameAuthenticationFailed) {
       try decryptFile(key: Self.key, ciphertext: truncated)
     }
   }
 
-  /// An input that ends inside the 24-byte header is rejected as a
-  /// truncated header.
+  /// An input that ends inside the 24-byte header is rejected as
+  /// truncated.
   func testHeaderIncompleteRejected() throws {
     for length in [0, 1, 23] {
       var decryptor = try FileDecryptor(key: Self.key)
       _ = try decryptor.push([UInt8](repeating: 0, count: length))
-      XCTAssertThrowsError(try decryptor.finish()) { error in
-        XCTAssertEqual(
-          (error as? XChatError)?.message,
-          "stream ended before header was complete",
-          "length \(length)")
-      }
+      assertThrows(.truncated, "length \(length)") { try decryptor.finish() }
     }
   }
 
@@ -198,17 +204,25 @@ final class FileCryptoTests: XCTestCase {
     XCTAssertEqual(encrypted.count, 24 + 1041)
 
     var decryptor = try FileDecryptor(key: Self.key)
-    assertThrows("data after final stream frame") {
+    assertThrows(.dataAfterFinalFrame) {
       try decryptor.push(encrypted + [UInt8](repeating: 0, count: 100))
     }
   }
 
   /// A tampered frame byte fails authentication and yields no plaintext.
+  /// The last frame's failure is its own case, since it may also be cut
+  /// short.
   func testTamperedFrameRejected() throws {
-    for index in [24, 100, 1064, 24 + 1041 + 10] {
+    let faults: [(index: Int, fault: XChatError.FileFailure)] = [
+      (24, .authenticationFailed),
+      (100, .authenticationFailed),
+      (1064, .authenticationFailed),
+      (24 + 1041 + 10, .lastFrameAuthenticationFailed),
+    ]
+    for (index, fault) in faults {
       var tampered = Self.vectorCiphertext
       tampered[index] ^= 0x80
-      assertThrows("secretstream pull failed") {
+      assertThrows(fault, "byte \(index)") {
         try decryptFile(key: Self.key, ciphertext: tampered)
       }
     }
@@ -218,49 +232,42 @@ final class FileCryptoTests: XCTestCase {
   func testTamperedHeaderRejected() throws {
     var tampered = Self.vectorCiphertext
     tampered[0] ^= 1
-    assertThrows("secretstream pull failed") {
+    assertThrows(.authenticationFailed) {
       try decryptFile(key: Self.key, ciphertext: tampered)
     }
   }
 
-  // MARK: Media faults name the media hash key
+  // MARK: Media faults carry the media hash key
 
   private static let mediaHashKey = TestVectors.string("media_conversation_key_hash_key")
 
-  /// A frame that fails with data behind it names the media.
+  /// A frame that fails with data behind it fails authentication, for that
+  /// media.
   func testMediaBadFrameNamesTheMedia() throws {
     var tampered = Self.vectorCiphertext
     tampered[24 + 10] ^= 0x80
-    assertThrows(
-      "the bytes are not the encrypted file of media_hash_key '\(Self.mediaHashKey)', or "
-        + "they are corrupted: pass the bytes downloaded for that media hash key"
-    ) {
+    assertThrows(.decryption(.file(.authenticationFailed, mediaHashKey: Self.mediaHashKey))) {
       try decryptMedia(key: Self.key, mediaHashKey: Self.mediaHashKey, encrypted: tampered)
     }
   }
 
-  /// A last frame that fails its MAC names the media and lists the causes.
+  /// A last frame that fails its MAC is its own fault, for that media,
+  /// since the bytes may also be cut short inside it.
   func testMediaBadLastFrameNamesTheMedia() throws {
     var tampered = Self.vectorCiphertext
     tampered[24 + 1041 + 10] ^= 0x80
     assertThrows(
-      "the bytes are not the complete encrypted file of media_hash_key '\(Self.mediaHashKey)': "
-        + "they are truncated, corrupted, or another file; pass the complete bytes "
-        + "downloaded for that media hash key"
+      .decryption(.file(.lastFrameAuthenticationFailed, mediaHashKey: Self.mediaHashKey))
     ) {
       try decryptMedia(key: Self.key, mediaHashKey: Self.mediaHashKey, encrypted: tampered)
     }
   }
 
-  /// Data after the final frame names the media and says to pass only its
-  /// bytes.
+  /// Data after the final frame is reported for that media.
   func testMediaTrailingDataNamesTheMedia() throws {
     let encrypted = try encryptFile(
       key: Self.key, plaintext: [UInt8](repeating: 9, count: 1024))
-    assertThrows(
-      "the bytes continue past the end of the encrypted file of media_hash_key "
-        + "'\(Self.mediaHashKey)': pass only the bytes downloaded for that media hash key"
-    ) {
+    assertThrows(.decryption(.file(.dataAfterFinalFrame, mediaHashKey: Self.mediaHashKey))) {
       try decryptMedia(
         key: Self.key,
         mediaHashKey: Self.mediaHashKey,
@@ -268,42 +275,32 @@ final class FileCryptoTests: XCTestCase {
     }
   }
 
-  /// A missing final frame names the media and says the bytes are
-  /// truncated.
+  /// A missing final frame reports that media's bytes as truncated.
   func testMediaTruncationNamesTheMedia() throws {
     let truncated = Array(Self.vectorCiphertext[0..<(Self.vectorCiphertext.count - 493)])
-    assertThrows(
-      "the bytes of media_hash_key '\(Self.mediaHashKey)' are truncated: pass the complete "
-        + "bytes downloaded for that media hash key"
-    ) {
+    assertThrows(.decryption(.file(.truncated, mediaHashKey: Self.mediaHashKey))) {
       try decryptMedia(key: Self.key, mediaHashKey: Self.mediaHashKey, encrypted: truncated)
     }
   }
 
   // MARK: Input and state validation
 
-  /// Keys must be 32 bytes at every entry point.
+  /// Keys must be 32 bytes at every entry point, and a key of another
+  /// length is reported as the file's key, as `encryptFileWithKey` and
+  /// `decryptFileWithKey` report it.
   func testKeyLengthValidation() {
     for length in [0, 16, 31, 33] {
       let key = [UInt8](repeating: 0, count: length)
-      assertThrows(
-        "Conversation key must be 32 bytes", kind: .invalidInput
-      ) {
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
         _ = try FileEncryptor(key: key)
       }
-      assertThrows(
-        "Conversation key must be 32 bytes", kind: .invalidInput
-      ) {
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
         try FileDecryptor(key: key)
       }
-      assertThrows(
-        "Conversation key must be 32 bytes", kind: .invalidInput
-      ) {
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
         try encryptFile(key: key, plaintext: [1])
       }
-      assertThrows(
-        "Conversation key must be 32 bytes", kind: .invalidInput
-      ) {
+      assertThrows(.invalidInput(.fileKeyLength(length))) {
         try decryptFile(key: key, ciphertext: [1])
       }
     }
@@ -313,10 +310,10 @@ final class FileCryptoTests: XCTestCase {
   func testFinishedEncryptorRejectsReuse() throws {
     var encryptor = try FileEncryptor(key: Self.key)
     _ = try encryptor.finish()
-    assertThrows("File encryptor already finished", kind: .invalidInput) {
+    assertThrows(.invalidInput(.fileEncryptorFinished)) {
       try encryptor.push([1, 2, 3])
     }
-    assertThrows("File encryptor already finished", kind: .invalidInput) {
+    assertThrows(.invalidInput(.fileEncryptorFinished)) {
       try encryptor.finish()
     }
   }
@@ -326,17 +323,17 @@ final class FileCryptoTests: XCTestCase {
   func testFinishedDecryptorRejectsReuse() throws {
     var failed = try FileDecryptor(key: Self.key)
     XCTAssertThrowsError(try failed.finish())
-    assertThrows("File decryptor already finished", kind: .invalidInput) {
+    assertThrows(.invalidInput(.fileDecryptorFinished)) {
       try failed.finish()
     }
 
     var decryptor = try FileDecryptor(key: Self.key)
     _ = try decryptor.push(Self.vectorCiphertext)
     _ = try decryptor.finish()
-    assertThrows("File decryptor already finished", kind: .invalidInput) {
+    assertThrows(.invalidInput(.fileDecryptorFinished)) {
       try decryptor.push([1])
     }
-    assertThrows("File decryptor already finished", kind: .invalidInput) {
+    assertThrows(.invalidInput(.fileDecryptorFinished)) {
       try decryptor.finish()
     }
   }

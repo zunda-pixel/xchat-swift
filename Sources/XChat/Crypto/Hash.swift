@@ -13,19 +13,16 @@ func hmacSHA256(message: [UInt8], key: [UInt8]) -> [UInt8] {
 
 /// HKDF-SHA256 (RFC 5869) with a string salt; an empty salt expands to 32
 /// zero bytes. `hkdf` is this with an empty `info`.
-func hkdf(secret: [UInt8], salt: String, length: Int) throws -> [UInt8] {
-  try hkdfWithInfo(secret: secret, salt: salt, info: [], length: length)
+func hkdf(secret: [UInt8], salt: String, length: Int) -> [UInt8] {
+  hkdfWithInfo(secret: secret, salt: salt, info: [], length: length)
 }
 
 /// HKDF-SHA256 with an `info` input, which domain-separates keys derived
-/// from the same secret and salt with different purposes.
-func hkdfWithInfo(secret: [UInt8], salt: String, info: [UInt8], length: Int) throws -> [UInt8] {
-  // Maximum output length per the HKDF spec: 255 blocks of 32 bytes.
-  let maximumLength = 32 * 255
-  guard length <= maximumLength else {
-    throw XChatError.internalError(
-      "Requested length \(length) exceeds maximum \(maximumLength)")
-  }
+/// from the same secret and salt with different purposes. `length` is a
+/// key or id size the SDK fixes, at most the spec's 255 blocks of 32
+/// bytes.
+func hkdfWithInfo(secret: [UInt8], salt: String, info: [UInt8], length: Int) -> [UInt8] {
+  precondition(length <= 32 * 255, "HKDF-SHA256 derives at most 8160 bytes")
 
   // An empty salt expands to 32 zero bytes.
   let saltBytes = salt.isEmpty ? [UInt8](repeating: 0, count: 32) : Array(salt.utf8)

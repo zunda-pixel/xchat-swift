@@ -30,7 +30,7 @@ final class PipelineTests: XCTestCase {
 
   private func message(_ event: XChatEvent) throws -> Message {
     guard case .message(let message) = event else {
-      throw XChatError.parse("expected a message event")
+      return try XCTUnwrap(nil, "expected a message event, got \(event)")
     }
     return message
   }
@@ -77,13 +77,9 @@ final class PipelineTests: XCTestCase {
         TestVectors.string("event_message_b64"),
         signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
     ) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, .decryption)
-      XCTAssertTrue(
-        error?.message.hasPrefix(
-          "Message encrypted with key version '1001' but no matching key found")
-          ?? false,
-        error?.message ?? "")
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(.missingConversationKey(.message, version: "1001", available: [])))
     }
   }
 
@@ -98,12 +94,7 @@ final class PipelineTests: XCTestCase {
         conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
         signingKeys: [wrongKey])
     ) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, .verification)
-      XCTAssertEqual(
-        error?.message,
-        "Message signature could not be verified: "
-          + "signature missing or no matching signing key")
+      XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
     }
 
     // With the policy off the message decrypts, marked unverified.
@@ -121,7 +112,9 @@ final class PipelineTests: XCTestCase {
     XCTAssertThrowsError(
       try XChatCore().decryptEvent(TestVectors.string("event_garbage_b64"))
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .parse)
+      XCTAssertEqual(
+        error as? XChatError,
+        .parse(.event(.base64(.invalidByte(UInt8(ascii: "!"))))))
     }
   }
 
@@ -137,8 +130,8 @@ final class PipelineTests: XCTestCase {
       ],
       signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
 
-    XCTAssertEqual(result.errors.count, 1)
-    XCTAssertNotNil(result.errors[2])
+    XCTAssertEqual(
+      result.errors, [2: .parse(.event(.base64(.invalidByte(UInt8(ascii: "!")))))])
     XCTAssertEqual(
       result.conversationKeys.keys["1001"],
       TestVectors.bytes("conversation_key_b64"))
@@ -178,7 +171,7 @@ final class PipelineTests: XCTestCase {
 
     let rejected = core.decryptEvents([unsignedEvent], signingKeys: [signing])
     XCTAssertTrue(rejected.conversationKeys.keys.isEmpty)
-    XCTAssertNotNil(rejected.errors[0])
+    XCTAssertEqual(rejected.errors, [0: .verification(.unverifiable(.keyChange))])
     let inspection = try makeCore(rejectUnverified: false)
       .decryptEvents([unsignedEvent], signingKeys: [signing])
     XCTAssertEqual(inspection.events.count, 1)
@@ -187,8 +180,8 @@ final class PipelineTests: XCTestCase {
     for keyEvents in [[encoded, unsignedEvent], [unsignedEvent, encoded]] {
       let result = core.decryptEvents(
         keyEvents + [TestVectors.string("event_message_b64")], signingKeys: [signing])
-      XCTAssertEqual(result.errors.count, 1)
-      XCTAssertNotNil(result.errors[try XCTUnwrap(keyEvents.firstIndex(of: unsignedEvent))])
+      let unsignedIndex = try XCTUnwrap(keyEvents.firstIndex(of: unsignedEvent))
+      XCTAssertEqual(result.errors, [unsignedIndex: .verification(.unverifiable(.keyChange))])
       XCTAssertEqual(
         result.conversationKeys.keys["1001"], TestVectors.bytes("conversation_key_b64"))
       let decrypted = try message(XCTUnwrap(result.events.last).event)
@@ -308,11 +301,12 @@ final class PipelineTests: XCTestCase {
       ])
     XCTAssertEqual(message.mediaHashes.map(\.source), ["media", "media"])
 
-    let messageKey = try deriveMessageKey(
-      conversationKey: try Hex.decode(
-        TestVectors.string("message_key_conversation_key_hex")),
-      senderId: TestVectors.string("message_key_sender_id"),
-      messageId: try XCTUnwrap(message.meta.messageId))
+    let messageKey = try XCTUnwrap(
+      deriveMessageKey(
+        conversationKey: try Hex.decode(
+          TestVectors.string("message_key_conversation_key_hex")),
+        senderId: TestVectors.string("message_key_sender_id"),
+        messageId: try XCTUnwrap(message.meta.messageId)))
 
     let files: [(hashField: String, encryptedField: String, plaintextField: String)] = [
       ("media_first_hash_key", "media_first_encrypted_b64", "media_first_plaintext_b64"),
@@ -330,7 +324,7 @@ final class PipelineTests: XCTestCase {
       let attachmentId = resolveAttachmentId(
         storedId: attachment.attachmentId, messageId: message.meta.messageId ?? "",
         index: index)
-      let attachmentKey = try deriveAttachmentKey(
+      let attachmentKey = deriveAttachmentKey(
         messageKey: messageKey, attachmentId: attachmentId)
       XCTAssertEqual(
         try decryptFile(
@@ -442,7 +436,7 @@ final class PipelineTests: XCTestCase {
           conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
           signingKeys: [key])
       ) { error in
-        XCTAssertEqual((error as? XChatError)?.kind, .verification)
+        XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
       }
     }
   }

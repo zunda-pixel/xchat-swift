@@ -33,7 +33,12 @@ extension XChatCore {
 
   /// Decrypts a received media file: the message's event names it by its
   /// media hash key, and the SDK derives the key from the message's
-  /// conversation key or per-message key. Failures name the media.
+  /// conversation key or per-message key. Of the decryption failures, only
+  /// those of the file's bytes (`DecryptionFailure.file`) carry the media
+  /// hash key: the others are failures to open the message to resolve the
+  /// file's key, and name the message instead. A media hash key the
+  /// message does not list is `InputFailure.mediaHashKeyNotFound`, which
+  /// carries it too.
   public func decryptFile(
     _ encrypted: [UInt8],
     eventB64: String,
@@ -48,7 +53,8 @@ extension XChatCore {
   }
 
   /// An incremental decryptor for a received media file; the key is
-  /// resolved like `decryptFile`.
+  /// resolved, and the failures of the file's bytes carry its media hash
+  /// key, as in `decryptFile`.
   public func fileDecryptor(
     eventB64: String,
     conversationKeys: [String: [UInt8]],
@@ -66,25 +72,13 @@ extension XChatCore {
   /// format `encryptedFileSize` describes, with nothing derived from a
   /// message.
   public func encryptFileWithKey(_ file: [UInt8], key: [UInt8]) throws -> [UInt8] {
-    try requireFileKey(key)
-    return try XChat.encryptFile(key: key, plaintext: file)
+    try XChat.encryptFile(key: key, plaintext: file)
   }
 
   /// Decrypts a file encrypted under a key the caller holds, such as a
   /// group's avatar image under its conversation key.
   public func decryptFileWithKey(_ encrypted: [UInt8], key: [UInt8]) throws -> [UInt8] {
-    try requireFileKey(key)
-    do {
-      return try XChat.decryptFile(key: key, ciphertext: encrypted)
-    } catch {
-      if let error = error as? XChatError, error.kind == .decryption {
-        throw XChatError.decryption(
-          "the bytes are not a complete file encrypted under this key "
-            + "(\(error.message)): pass all the encrypted bytes and the key they "
-            + "were encrypted under")
-      }
-      throw error
-    }
+    try XChat.decryptFile(key: key, ciphertext: encrypted)
   }
 
   // MARK: Key resolution
@@ -100,11 +94,6 @@ extension XChatCore {
     var keys: AttachmentKeys
   }
 
-  enum KeySource {
-    case map
-    case single
-  }
-
   /// The key of the media file `mediaHashKey` names in a received message.
   func mediaKey(
     eventB64: String,
@@ -112,49 +101,39 @@ extension XChatCore {
     mediaHashKey: String
   ) throws -> [UInt8] {
     guard !mediaHashKey.isEmpty else {
-      throw XChatError.invalidInput(
-        "media_hash_key is empty: pass the media hash key of the attachment, from the "
-          + "message decryptEvent returned")
+      throw XChatError.invalidInput(.emptyMediaHashKey)
     }
     let event = try parseEvent(eventB64)
     guard case .messageCreate(let create)? = event.detail else {
-      throw XChatError.invalidInput(
-        "the event is not a message, so it has no media: pass the event of the message "
-          + "that carries the media")
+      throw XChatError.invalidInput(.notMessageEvent(.message))
     }
     let message = try openMessage(
       event, create, conversationKeys: conversationKeys, carriedMessageKey: nil,
-      which: "the message", keySource: .map)
-    if let key = try attachmentKey(message, mediaHashKey: mediaHashKey) {
+      role: .message)
+    if let key = attachmentKey(message, mediaHashKey: mediaHashKey) {
       return key
     }
 
-    var known = mediaHashKeys(message.contents.attachments)
+    var available = mediaHashKeys(message.contents.attachments)
     if let preview = message.contents.replyingToPreview {
-      let shown = mediaHashKeys(preview.attachments)
       do {
         let quoted = try openQuoted(
           event, preview: preview, conversationKeys: conversationKeys)
-        if let key = try attachmentKey(quoted, mediaHashKey: mediaHashKey) {
+        if let key = attachmentKey(quoted, mediaHashKey: mediaHashKey) {
           return key
         }
-        known += mediaHashKeys(quoted.contents.attachments)
+        available += mediaHashKeys(quoted.contents.attachments)
       } catch {
-        // When the preview shows this media, why its message cannot
-        // be opened is the answer; otherwise it is not quoted here.
-        if shown.contains(mediaHashKey) { throw error }
-        known += shown
+        // When the preview shows this media, why its message cannot be
+        // opened is the answer. Otherwise the preview's media hash keys are
+        // not listed as available: the sender wrote them, unchecked against
+        // a message this call cannot open, and passing one of them throws
+        // this error.
+        if mediaHashKeys(preview.attachments).contains(mediaHashKey) { throw error }
       }
     }
 
-    if known.isEmpty {
-      throw XChatError.invalidInput(
-        "the message has no media: pass the event of the message that carries the media")
-    }
-    throw XChatError.invalidInput(
-      "media_hash_key '\(mediaHashKey)' is not in the message, whose media hash keys are "
-        + "\(known.joined(separator: ", ")): pass one of those, or the event of the "
-        + "message that carries this media")
+    throw XChatError.invalidInput(.mediaHashKeyNotFound(mediaHashKey, available: available))
   }
 
   /// The key a file is encrypted under for an outgoing message: the key of
@@ -166,135 +145,97 @@ extension XChatCore {
     conversationKeyVersion: String,
     mediaHashKey: String
   ) throws -> [UInt8] {
+    // The key and version are the sender's own, as `encryptMessage` takes
+    // them, so they are checked first, before the media hash key, as every
+    // send checks them before anything else it is given. Checked only by
+    // opening the message, a key of the wrong length would fail as the
+    // message's contents not decrypting, and a malformed version as no key
+    // being given for the message's version.
+    guard conversationKey.count == 32 else {
+      throw XChatError.invalidInput(.conversationKeyLength(conversationKey.count))
+    }
+    guard isKeyVersion(conversationKeyVersion) else {
+      throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
+    }
     guard !mediaHashKey.isEmpty else {
-      throw XChatError.invalidInput(
-        "media_hash_key is empty: pass the media hash key the file's upload started "
-          + "with, as listed in the message's attachments")
+      throw XChatError.invalidInput(.emptyMediaHashKey)
     }
     let event = try parseEvent(eventB64)
     guard case .messageCreate(let create)? = event.detail else {
-      throw XChatError.invalidInput(
-        "the event is not a message: pass the eventB64 of the payload that encryptMessage "
-          + "or encryptReply returned")
+      throw XChatError.invalidInput(.notMessageEvent(.message))
     }
     let message = try openMessage(
       event, create,
       conversationKeys: [conversationKeyVersion: conversationKey],
-      carriedMessageKey: nil, which: "the message", keySource: .single)
-    if let key = try attachmentKey(message, mediaHashKey: mediaHashKey) {
+      carriedMessageKey: nil, role: .message)
+    if let key = attachmentKey(message, mediaHashKey: mediaHashKey) {
       return key
     }
 
     let quoted = mediaHashKeys(message.contents.replyingToPreview?.attachments)
     if quoted.contains(mediaHashKey) {
-      throw XChatError.invalidInput(
-        "media_hash_key '\(mediaHashKey)' is media the reply quotes: its file belongs "
-          + "to the quoted message and was uploaded with it, so there is nothing to "
-          + "encrypt")
+      throw XChatError.invalidInput(.quotedMediaHashKey(mediaHashKey))
     }
     let own = mediaHashKeys(message.contents.attachments)
-    if own.isEmpty {
-      throw XChatError.invalidInput(
-        "the message has no files: list each file's media hash key in the message's "
-          + "attachments, then encrypt the file with the payload that returns")
-    }
-    throw XChatError.invalidInput(
-      "media_hash_key '\(mediaHashKey)' is not one of the message's files, whose media "
-        + "hash keys are \(own.joined(separator: ", ")): pass one of those, or list this "
-        + "file in the message's attachments")
+    throw XChatError.invalidInput(.mediaHashKeyNotFound(mediaHashKey, available: own))
   }
 
   /// Decrypts a message event's contents and reports what its attachments'
-  /// keys come from.
+  /// keys come from. `role` says which message errors are about.
   func openMessage(
     _ event: MessageEvent,
     _ create: MessageCreateEvent,
     conversationKeys: [String: [UInt8]],
     carriedMessageKey: [UInt8]?,
-    which: String,
-    keySource: KeySource
+    role: XChatError.MessageRole
   ) throws -> OpenedMessage {
     guard let version = create.conversationKeyVersion else {
-      throw XChatError.invalidInput(
-        "\(which) is not encrypted, so neither is its media: use the downloaded bytes "
-          + "as they are")
+      throw XChatError.invalidInput(.notEncrypted(role))
     }
     let carried =
       usesMessageKey(create.contentsEncryptionVersion.map { Int($0) })
       ? carriedMessageKey : nil
 
     let keys: AttachmentKeys
-    let source: String
+    let source: XChatError.ContentsKey
     if let conversationKey = conversationKeys[version] {
       if let messageKey = try messageKeyFor(
-        event, create: create, conversationKey: conversationKey)
+        event, create: create, conversationKey: conversationKey, role: role)
       {
-        keys = .message(
-          key: messageKey, messageId: try requireMessageId(event, which))
-        source =
-          keySource == .map
-          ? "the key for version '\(version)' in conversationKeys"
-          : "conversationKey (version '\(version)')"
+        keys = .message(key: messageKey, messageId: try requireMessageId(event, role))
       } else {
         keys = .conversation(conversationKey)
-        source =
-          keySource == .map
-          ? "the key for version '\(version)' in conversationKeys"
-          : "conversationKey (version '\(version)')"
       }
+      source = .conversationKey(version: version)
     } else if let carried {
-      guard carried.count == 32 else {
-        throw XChatError.invalidInput(
-          "the key the reply carries for \(which) is not 32 bytes: pass \(which)'s "
-            + "own event")
-      }
-      keys = .message(key: carried, messageId: try requireMessageId(event, which))
-      source = "the key the reply carries for \(which)"
+      // A carried key of the wrong length fails to decrypt the contents
+      // below, as a conversation key given directly does.
+      keys = .message(key: carried, messageId: try requireMessageId(event, role))
+      source = .carriedByReply(version: version)
     } else {
-      let versions = conversationKeys.keys.sorted().joined(separator: ", ")
       throw XChatError.decryption(
-        "conversationKeys has no key for version '\(version)', which \(which) is "
-          + "encrypted under (it has versions [\(versions)]): pass the conversation's "
-          + "key map from decryptEvents or extractConversationKeys, including version "
-          + "'\(version)'")
+        .missingConversationKey(
+          role, version: version, available: keyVersionsInOrder(conversationKeys.keys)))
     }
 
     guard let contents = create.contents else {
-      throw XChatError.invalidInput("\(which) has no contents")
+      throw XChatError.invalidInput(.noContents(role))
     }
     let contentsKey: [UInt8]
     switch keys {
     case .conversation(let key): contentsKey = key
     case .message(let key, _): contentsKey = key
     }
-    let plaintext: [UInt8]
-    do {
-      plaintext = try decryptMessage(key: contentsKey, ciphertext: contents)
-    } catch {
-      throw XChatError.decryption(
-        "\(source) does not decrypt \(which): pass the conversation key for version "
-          + "'\(version)'")
-    }
-
-    var reader = ThriftReader(plaintext)
-    let holder: MessageEntryHolder
-    do {
-      holder = try MessageEntryHolder.read(&reader)
-    } catch {
-      throw XChatError.parse(
-        "Content parse error: \((error as? XChatError)?.message ?? String(describing: error))")
-    }
+    let plaintext = try decryptContents(contents, key: contentsKey, of: role, from: source)
+    let holder = try readThrift(
+      plaintext, as: { .messageContents(role, $0) }, MessageEntryHolder.read)
     switch holder.contents {
     case .message(let message):
       return OpenedMessage(contents: message, keys: keys)
     case .messageEdit:
-      throw XChatError.invalidInput(
-        "\(which) is an edit, and edits carry no media: pass the event of the message "
-          + "that was edited")
+      throw XChatError.invalidInput(.messageIsEdit(role))
     default:
-      throw XChatError.invalidInput(
-        "\(which) is a reaction, read marker, or other entry without media: pass the "
-          + "event of the message that carries the media")
+      throw XChatError.invalidInput(.notTextMessage(role))
     }
   }
 
@@ -305,33 +246,26 @@ extension XChatCore {
     conversationKeys: [String: [UInt8]]
   ) throws -> OpenedMessage {
     guard let quoted = preview.rawEventMessageCreate else {
-      throw XChatError.invalidInput(
-        "the reply does not embed the message it quotes, so that message's media can't "
-          + "be opened through the reply: pass the quoted message's own event")
+      throw XChatError.invalidInput(.quotedMessageNotEmbedded)
     }
     guard let conversationId = quoted.conversationId,
       conversationId == reply.conversationId
     else {
-      throw XChatError.invalidInput(
-        "the reply quotes a message from another conversation: pass the quoted "
-          + "message's own event")
+      throw XChatError.invalidInput(.quotedMessageInOtherConversation)
     }
     guard case .messageCreate(let create)? = quoted.detail else {
-      throw XChatError.invalidInput(
-        "the reply's quoted event is not a message: pass the event of the message that "
-          + "carries the media")
+      throw XChatError.invalidInput(.notMessageEvent(.quotedMessage))
     }
     return try openMessage(
       quoted, create, conversationKeys: conversationKeys,
-      carriedMessageKey: preview.rawEventMessageKey,
-      which: "the quoted message", keySource: .map)
+      carriedMessageKey: preview.rawEventMessageKey, role: .quotedMessage)
   }
 
   /// The key of the attachment carrying `mediaHashKey`, when the message
   /// has one.
   private func attachmentKey(
     _ message: OpenedMessage, mediaHashKey: String
-  ) throws -> [UInt8]? {
+  ) -> [UInt8]? {
     guard
       let found = findAttachment(
         message.contents.attachments, mediaHashKey: mediaHashKey)
@@ -340,7 +274,7 @@ extension XChatCore {
     case .conversation(let key):
       return key
     case .message(let messageKey, let messageId):
-      return try deriveAttachmentKey(
+      return deriveAttachmentKey(
         messageKey: messageKey,
         attachmentId: resolveAttachmentId(
           storedId: found.ownId, messageId: messageId, index: found.position))
@@ -387,17 +321,14 @@ extension XChatCore {
     }
   }
 
-  private func requireMessageId(_ event: MessageEvent, _ which: String) throws -> String {
+  /// The message id a per-message key's attachments derive their keys
+  /// from; its absence fails like a message key's missing ids.
+  private func requireMessageId(
+    _ event: MessageEvent, _ role: XChatError.MessageRole
+  ) throws -> String {
     guard let messageId = event.messageId else {
-      throw XChatError.invalidInput("\(which) has no message id")
+      throw XChatError.decryption(.missingSenderOrMessageId(role))
     }
     return messageId
-  }
-
-  private func requireFileKey(_ key: [UInt8]) throws {
-    guard key.count == 32 else {
-      throw XChatError.invalidInput(
-        "Invalid key (expected 32 bytes, got \(key.count))")
-    }
   }
 }

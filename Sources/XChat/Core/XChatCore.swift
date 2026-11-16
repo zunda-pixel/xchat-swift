@@ -53,9 +53,9 @@ public final class XChatCore {
     signingPrivateKey: [UInt8]? = nil,
     publicKeyVersion: String? = nil
   ) throws {
-    _ = try parsePrivateKey(identityPrivateKey)
+    _ = try parsePrivateKey(identityPrivateKey, purpose: .identity)
     if let signingPrivateKey {
-      _ = try parsePrivateKey(signingPrivateKey)
+      _ = try parsePrivateKey(signingPrivateKey, purpose: .signing)
     }
     if let publicKeyVersion {
       try validatePublicKeyVersion(publicKeyVersion)
@@ -69,7 +69,7 @@ public final class XChatCore {
   /// wiping the returned bytes.
   public func exportKeys() throws -> (identity: [UInt8], signing: [UInt8]?) {
     guard let identityPrivateKey else {
-      throw XChatError.invalidState("keys are not loaded: import keys first")
+      throw XChatError.invalidState(.keysNotLoaded)
     }
     return (identityPrivateKey, signingPrivateKey)
   }
@@ -77,15 +77,15 @@ public final class XChatCore {
   /// The loaded identity key's SEC1 public key (65 bytes).
   public func identityPublicKey() throws -> [UInt8] {
     guard let identityPrivateKey else {
-      throw XChatError.invalidState("keys are not loaded: import keys first")
+      throw XChatError.invalidState(.keysNotLoaded)
     }
-    return try derivePublicKey(privateKey: identityPrivateKey)
+    return try derivePublicKey(privateKey: identityPrivateKey, purpose: .identity)
   }
 
   /// The loaded signing key's SEC1 public key (65 bytes), when present.
   public func signingPublicKey() throws -> [UInt8]? {
     guard let signingPrivateKey else { return nil }
-    return try derivePublicKey(privateKey: signingPrivateKey)
+    return try derivePublicKey(privateKey: signingPrivateKey, purpose: .signing)
   }
 
   // MARK: Decryption
@@ -127,10 +127,8 @@ public final class XChatCore {
     let parsed: [Result<MessageEvent, XChatError>] = events.map { eventB64 in
       do {
         return .success(try parseEvent(eventB64))
-      } catch let error as XChatError {
-        return .failure(error)
       } catch {
-        return .failure(.internalError(String(describing: error)))
+        return .failure(XChatError(error))
       }
     }
 
@@ -138,7 +136,7 @@ public final class XChatCore {
     var conflictingVersions: Set<String> = []
     var keyChanges: [Int: KeyChange] = [:]
     var verifiedKeyIndices: [Int] = []
-    var errors: [Int: String] = [:]
+    var errors: [Int: XChatError] = [:]
     var batchConversations: Set<String> = []
     for (index, result) in parsed.enumerated() {
       guard let event = try? result.get() else { continue }
@@ -168,7 +166,7 @@ public final class XChatCore {
           keys[version] = key
         }
       } catch {
-        errors[index] = reason(of: error)
+        errors[index] = XChatError(error)
       }
     }
 
@@ -204,7 +202,7 @@ public final class XChatCore {
         decrypted.append(
           DecryptedEvent(event: decryptedEvent, originalB64: eventB64))
       } catch {
-        errors[index] = (error as? XChatError)?.message ?? String(describing: error)
+        errors[index] = XChatError(error)
       }
     }
 
@@ -286,7 +284,7 @@ public final class XChatCore {
       : checkEventSignature(
         event: parsed, detail: .messageCreate(create),
         signingKeys: signatureKeys(signingKeys))
-    try enforceVerification(check, label: "Message")
+    try enforceVerification(check, of: .message)
 
     let plaintext: [UInt8]
     if unencrypted {
@@ -294,16 +292,15 @@ public final class XChatCore {
     } else {
       let version = create.conversationKeyVersion ?? ""
       guard let conversationKey = keys[version] else {
-        let available = keys.keys.sorted().joined(separator: ", ")
         throw XChatError.decryption(
-          "Message encrypted with key version '\(version)' but no matching key found. "
-            + "Available versions: [\(available)]. Include the conversation's "
-            + "KeyChange events in the batch passed to decryptEvents(), or pass the "
-            + "matching key map to decryptEvent().")
+          .missingConversationKey(
+            .message, version: version, available: keyVersionsInOrder(keys.keys)))
       }
-      let messageKey = try messageKeyFor(parsed, create: create, conversationKey: conversationKey)
-      plaintext = try decryptMessage(
-        key: messageKey ?? conversationKey, ciphertext: contents)
+      let messageKey = try messageKeyFor(
+        parsed, create: create, conversationKey: conversationKey, role: .message)
+      plaintext = try decryptContents(
+        contents, key: messageKey ?? conversationKey, of: .message,
+        from: .conversationKey(version: version))
     }
 
     let content = try parseMessageContent(plaintext)
@@ -337,7 +334,7 @@ public final class XChatCore {
       event: parsed, detail: .conversationKeyChange(change),
       signingKeys: signatureKeys(signingKeys),
       plaintextConversationKeyB64: plaintextKey.map(Base64.encodeStandard))
-    try enforceVerification(check, label: "KeyChange")
+    try enforceVerification(check, of: .keyChange)
     if check == .verified, let conversationId = parsed.conversationId,
       let version = signatureVersion(of: parsed)
     {
@@ -362,18 +359,17 @@ public final class XChatCore {
   // MARK: Key handling
 
   /// Throws under the reject-unverified policy unless `check` verified.
-  private func enforceVerification(_ check: EventSignatureCheck, label: String) throws {
+  private func enforceVerification(
+    _ check: EventSignatureCheck, of event: XChatError.SignedEvent
+  ) throws {
     guard rejectUnverified else { return }
     switch check {
     case .verified:
       return
     case .unverifiable:
-      throw XChatError.verification(
-        "\(label) signature could not be verified: "
-          + "signature missing or no matching signing key")
-    case .failed(let reason):
-      throw XChatError.verification(
-        "\(label) signature verification failed: \(reason)")
+      throw XChatError.verification(.unverifiable(event))
+    case .failed(let rejection):
+      throw XChatError.verification(.rejected(event, rejection))
     }
   }
 
@@ -401,20 +397,37 @@ public final class XChatCore {
 
   /// The per-message key a v1 message uses, derived from its conversation
   /// key and the event's own sender and message id; nil for v0 messages.
+  /// `role` says which message errors are about.
   func messageKeyFor(
     _ parsed: MessageEvent,
     create: MessageCreateEvent,
-    conversationKey: [UInt8]
+    conversationKey: [UInt8],
+    role: XChatError.MessageRole
   ) throws -> [UInt8]? {
     guard usesMessageKey(create.contentsEncryptionVersion.map { Int($0) }) else {
       return nil
     }
-    guard let senderId = parsed.senderId, let messageId = parsed.messageId else {
-      throw XChatError.decryption(
-        "message key needs the event's sender id and message id")
+    return try messageKey(of: parsed, conversationKey: conversationKey, role: role)
+  }
+
+  /// The per-message key of `event`, derived from `conversationKey` and the
+  /// event's sender id and message id. `role` says which message errors
+  /// are about.
+  func messageKey(
+    of event: MessageEvent,
+    conversationKey: [UInt8],
+    role: XChatError.MessageRole
+  ) throws -> [UInt8] {
+    guard let senderId = event.senderId, let messageId = event.messageId else {
+      throw XChatError.decryption(.missingSenderOrMessageId(role))
     }
-    return try deriveMessageKey(
-      conversationKey: conversationKey, senderId: senderId, messageId: messageId)
+    guard
+      let key = deriveMessageKey(
+        conversationKey: conversationKey, senderId: senderId, messageId: messageId)
+    else {
+      throw XChatError.decryption(.nonNumericSenderId(role, senderId))
+    }
+    return key
   }
 
   /// Decrypts the conversation key a key change carries for this device,
@@ -448,16 +461,19 @@ public final class XChatCore {
     let bytes: [UInt8]
     do {
       bytes = try Base64.decodeStandard(eventB64)
-    } catch {
-      throw XChatError.parse("Invalid base64 event: \(reason(of: error))")
+    } catch XChatError.parse(.base64(let failure)) {
+      throw XChatError.parse(.event(.base64(failure)))
     }
-    var reader = ThriftReader(bytes)
-    do {
-      return try MessageEvent.read(&reader)
-    } catch {
-      throw XChatError.parse("Thrift parse error: \(reason(of: error))")
-    }
+    return try readThrift(bytes, as: { .event(.thrift($0)) }, MessageEvent.read)
   }
+}
+
+/// Conversation-key versions in the order
+/// `DecryptionFailure.missingConversationKey` lists them: by length, then
+/// character by character, which puts versions in canonical decimal form in
+/// numeric order ("9" before "10") and any other strings in a fixed order.
+func keyVersionsInOrder(_ versions: some Sequence<String>) -> [String] {
+  versions.sorted { ($0.count, $0) < ($1.count, $1) }
 }
 
 /// Converts verified signing-key entries into the form the signature layer
@@ -473,10 +489,6 @@ private func eventMeta(_ event: MessageEvent) -> EventMeta {
     createdAtMilliseconds: event.createdAtMilliseconds.flatMap(Int64.init))
 }
 
-private func reason(of error: some Error) -> String {
-  (error as? XChatError)?.message ?? String(describing: error)
-}
-
 /// A decrypted payload, with the wire preview kept for validation.
 private struct ParsedMessageContent {
   var content: MessageContent
@@ -486,13 +498,8 @@ private struct ParsedMessageContent {
 }
 
 private func parseMessageContent(_ bytes: [UInt8]) throws -> ParsedMessageContent {
-  var reader = ThriftReader(bytes)
-  let holder: MessageEntryHolder
-  do {
-    holder = try MessageEntryHolder.read(&reader)
-  } catch {
-    throw XChatError.parse("Content parse error: \(reason(of: error))")
-  }
+  let holder = try readThrift(
+    bytes, as: { .messageContents(.message, $0) }, MessageEntryHolder.read)
 
   var attachments: [AttachmentInfo] = []
   var mediaHashes: [MediaHashReference] = []
@@ -788,10 +795,10 @@ private func openQuotedEvent(
   } else if let version = create.conversationKeyVersion, let conversationKey = keys[version] {
     key =
       usesMessageKey
-      ? (try? deriveMessageKey(
+      ? deriveMessageKey(
         conversationKey: conversationKey,
         senderId: raw.senderId ?? "",
-        messageId: raw.messageId ?? ""))
+        messageId: raw.messageId ?? "")
       : conversationKey
   } else {
     key = nil

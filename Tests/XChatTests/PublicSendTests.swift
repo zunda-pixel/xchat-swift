@@ -34,20 +34,21 @@ import XChat
 
   let target = TestVectors.string("event_message_key_b64")
   let conversationId = TestVectors.string("event_conversation_id")
-  let error = #expect(throws: XChatError.self) {
+  #expect(
+    throws: XChatError.decryption(
+      .missingConversationKey(.quotedMessage, version: oldVersion, available: [newVersion]))
+  ) {
     try core.encryptReply(
       text: "after rotation", replyToEventB64: target, conversationId: conversationId,
       conversationKey: newKey, conversationKeyVersion: newVersion, senderId: sender)
   }
-  #expect(error?.kind == .decryption)
 
-  let wrongConversation = #expect(throws: XChatError.self) {
+  #expect(throws: XChatError.invalidInput(.quotedMessageInOtherConversation)) {
     try core.encryptReply(
       text: "after rotation", replyToEventB64: target, conversationId: "1111:3333",
       conversationKey: newKey, conversationKeyVersion: newVersion, senderId: sender,
       replyToConversationKeys: [oldVersion: oldKey])
   }
-  #expect(wrongConversation?.kind == .invalidInput)
 
   let payload = try core.encryptReply(
     text: "after rotation", replyToEventB64: target, conversationId: conversationId,
@@ -66,6 +67,27 @@ import XChat
   #expect(content.replyingToPreview?.messageText == TestVectors.string("event_message_key_text"))
 }
 
+/// A private key that is not a P-256 scalar is reported as the key it was
+/// passed as, and the keys loaded before stay loaded.
+@Test func importingAnInvalidPrivateKeyNamesWhichKey() throws {
+  let core = XChatCore()
+  let identity = TestVectors.bytes("identity_private_b64")
+  let signing = TestVectors.bytes("signing_private_b64")
+  try core.importKeys(
+    identityPrivateKey: identity, signingPrivateKey: signing, publicKeyVersion: "1")
+
+  let zero = [UInt8](repeating: 0, count: 32)
+  #expect(throws: XChatError.invalidInput(.privateKey(.identity))) {
+    try core.importKeys(identityPrivateKey: zero, signingPrivateKey: signing)
+  }
+  #expect(throws: XChatError.invalidInput(.privateKey(.signing))) {
+    try core.importKeys(identityPrivateKey: identity, signingPrivateKey: Array(zero.prefix(31)))
+  }
+  let keys = try core.exportKeys()
+  #expect(keys.identity == identity)
+  #expect(keys.signing == signing)
+}
+
 @Test(arguments: ["abc", "01", "-1", "9223372036854775808"])
 func importingAnInvalidKeyVersionPreservesLoadedKeys(version: String) throws {
   let core = XChatCore()
@@ -74,10 +96,9 @@ func importingAnInvalidKeyVersionPreservesLoadedKeys(version: String) throws {
   try core.importKeys(
     identityPrivateKey: identity, signingPrivateKey: signing, publicKeyVersion: "1")
 
-  let error = #expect(throws: XChatError.self) {
+  #expect(throws: XChatError.invalidInput(.publicKeyVersion(version))) {
     try core.importKeys(identityPrivateKey: signing, publicKeyVersion: version)
   }
-  #expect(error?.kind == .invalidInput)
   let keys = try core.exportKeys()
   #expect(keys.identity == identity)
   #expect(keys.signing == signing)

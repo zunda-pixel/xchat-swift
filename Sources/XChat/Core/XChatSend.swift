@@ -18,8 +18,12 @@ extension XChatCore {
     shouldNotify: Bool? = nil,
     ttlMilliseconds: Int64? = nil
   ) throws -> EncryptedMessagePayload {
+    let signer = try requireSigner()
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId, conversationId: conversationId)
     let version = sendVersion
-    let messageId = try outgoingMessageId(
+    let messageId = outgoingMessageId(
       version: version, conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       conversationId: conversationId, attachments: attachments)
@@ -28,7 +32,7 @@ extension XChatCore {
       quickReply: quickReply, messageId: messageId, version: version,
       replyPreview: nil)
     return try encryptAndSign(
-      contentBytes: content, conversationId: conversationId,
+      contentBytes: content, signer: signer, conversationId: conversationId,
       conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       messageId: messageId, version: version, shouldNotify: shouldNotify,
@@ -56,8 +60,18 @@ extension XChatCore {
     replyToAttachmentId: String? = nil,
     replyToConversationKeys: [String: [UInt8]] = [:]
   ) throws -> EncryptedMessagePayload {
+    let signer = try requireSigner()
+    // Checked before the quoted message is opened, which uses the reply's
+    // conversation key when it is under the same version: checked after, a
+    // key of the wrong length would fail as that message's contents not
+    // decrypting, a malformed version as no key being given for that
+    // message, and a malformed sender id, or a conversation id that is
+    // empty or holds a comma, as its conversation not matching.
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId, conversationId: conversationId)
     let version = sendVersion
-    let messageId = try outgoingMessageId(
+    let messageId = outgoingMessageId(
       version: version, conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       conversationId: conversationId, attachments: attachments)
@@ -73,7 +87,7 @@ extension XChatCore {
       quickReply: quickReply, messageId: messageId, version: version,
       replyPreview: reply.preview)
     return try encryptAndSign(
-      contentBytes: content, conversationId: conversationId,
+      contentBytes: content, signer: signer, conversationId: conversationId,
       conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       messageId: messageId, version: version, shouldNotify: shouldNotify,
@@ -90,13 +104,17 @@ extension XChatCore {
     senderId: String,
     shouldNotify: Bool? = nil
   ) throws -> EncryptedMessagePayload {
-    try encryptContent(
+    let signer = try requireSigner()
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId, conversationId: conversationId)
+    return try encryptContent(
       MessageEntryContents.reactionAdd(
         MessageReactionAdd(
           messageSequenceId: try requireSequenceId(targetMessageSequenceId),
           emoji: try requireEmoji(emoji),
           messageAttachmentId: nil)),
-      conversationId: conversationId, conversationKey: conversationKey,
+      signer: signer, conversationId: conversationId, conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       shouldNotify: shouldNotify, embeddedSigners: [])
   }
@@ -111,13 +129,17 @@ extension XChatCore {
     senderId: String,
     shouldNotify: Bool? = nil
   ) throws -> EncryptedMessagePayload {
-    try encryptContent(
+    let signer = try requireSigner()
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId, conversationId: conversationId)
+    return try encryptContent(
       MessageEntryContents.reactionRemove(
         MessageReactionRemove(
           messageSequenceId: try requireSequenceId(targetMessageSequenceId),
           emoji: try requireEmoji(emoji),
           messageAttachmentId: nil)),
-      conversationId: conversationId, conversationKey: conversationKey,
+      signer: signer, conversationId: conversationId, conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       shouldNotify: shouldNotify, embeddedSigners: [])
   }
@@ -136,6 +158,10 @@ extension XChatCore {
     entities: [EntityDescriptor]? = nil,
     shouldNotify: Bool? = nil
   ) throws -> EncryptedMessagePayload {
+    let signer = try requireSigner()
+    try requireSendParameters(
+      conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
+      senderId: senderId, conversationId: conversationId)
     let thriftEntities = try entities.map {
       try buildThriftEntities($0, text: updatedText)
     }
@@ -146,7 +172,7 @@ extension XChatCore {
           updatedText: updatedText,
           entities: thriftEntities,
           messageId: targetMessageId)),
-      conversationId: conversationId, conversationKey: conversationKey,
+      signer: signer, conversationId: conversationId, conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       shouldNotify: shouldNotify, embeddedSigners: [])
   }
@@ -155,8 +181,8 @@ extension XChatCore {
 
   /// Prepares a signed conversation-key change: a fresh key, each
   /// participant's ECIES-encrypted copy of it, and the signed event the
-  /// API persists. `conversationId` may be omitted for a one-to-one, where
-  /// it is derived from the two participants.
+  /// API persists. `conversationId` may be omitted (or empty) for a
+  /// one-to-one, where it is derived from the two participants.
   public func prepareConversationKeyChange(
     participants: [ConversationParticipantPublicKey],
     conversationId: String? = nil,
@@ -164,19 +190,30 @@ extension XChatCore {
     conversationKeyVersion: String,
     forKeyRotation: Bool = false
   ) throws -> PreparedConversationChange {
-    try validateUserId("sender_id", senderId)
-    try validateKeyVersion("conversation_key_version", conversationKeyVersion)
+    let signer = try requireSigner()
+    guard isUserId(senderId) else {
+      throw XChatError.invalidInput(.senderId(senderId))
+    }
+    guard isKeyVersion(conversationKeyVersion) else {
+      throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
+    }
+    if let conversationId, !conversationId.isEmpty {
+      try requireConversationId(conversationId)
+    }
     guard !participants.isEmpty else {
-      throw XChatError.invalidInput("public_keys must not be empty")
+      throw XChatError.invalidInput(.noParticipants)
     }
 
     // Keep each user's newest key version.
     var best: [String: ConversationParticipantPublicKey] = [:]
     var order: [String] = []
     for participant in participants {
-      try validateUserId("public_keys user_id", participant.userId)
-      try validateKeyVersion(
-        "public_keys public_key_version", participant.publicKeyVersion)
+      guard isUserId(participant.userId) else {
+        throw XChatError.invalidInput(.participantUserId(participant.userId))
+      }
+      guard isKeyVersion(participant.publicKeyVersion) else {
+        throw XChatError.invalidInput(.participantKeyVersion(participant.publicKeyVersion))
+      }
       if let current = best[participant.userId] {
         let newer: Bool
         if let newVersion = UInt64(participant.publicKeyVersion),
@@ -200,9 +237,7 @@ extension XChatCore {
       let distinctIds = Set(participants.map(\.userId))
       guard distinctIds.count == 2 else {
         throw XChatError.invalidInput(
-          "cannot derive a one-to-one conversation id from "
-            + "\(distinctIds.count) distinct user(s); "
-            + "pass conversation_id explicitly for group conversations")
+          .conversationIdNotDerivable(distinctUsers: distinctIds.count))
       }
       let ids = order
       resolvedConversationId = joinSortedPair(ids[0], ids[1])
@@ -212,8 +247,13 @@ extension XChatCore {
     var participantKeys: [ParticipantKey] = []
     for userId in order {
       guard let participant = best[userId] else { continue }
-      let publicKey = try Base64.decodeStandard(participant.identityPublicKey)
-      let encrypted = try encryptWithPublicKey(publicKey: publicKey, data: conversationKey)
+      let encrypted: [UInt8]
+      do {
+        let publicKey = try Base64.decodeStandard(participant.identityPublicKey)
+        encrypted = try encryptWithPublicKey(publicKey: publicKey, data: conversationKey)
+      } catch XChatError.parse(.base64(_)), PrimitiveError.invalidPublicKey {
+        throw XChatError.invalidInput(.participantIdentityKey(userId: userId))
+      }
       participantKeys.append(
         ParticipantKey(
           userId: userId,
@@ -232,19 +272,12 @@ extension XChatCore {
         },
         forKeyRotation: forKeyRotation))
 
-    guard let signingPrivateKey else {
-      throw XChatError.invalidState("signing key is not loaded")
-    }
-    guard let signingKeyVersion = keyVersion else {
-      throw XChatError.invalidInput(
-        "signing key version is not set: import keys with its public key version")
-    }
     let messageId = generateMessageId()
     let signatureVersion = keyChangeSignatureVersion(
       conversationId: resolvedConversationId)
     let (signature, _) = try signEventSignature(
-      signingPrivateKey: signingPrivateKey,
-      publicKeyVersion: signingKeyVersion,
+      signingPrivateKey: signer.privateKey,
+      publicKeyVersion: signer.publicKeyVersion,
       messageId: messageId,
       senderId: senderId,
       conversationId: resolvedConversationId,
@@ -275,6 +308,7 @@ extension XChatCore {
 
   private func encryptContent(
     _ contents: MessageEntryContents,
+    signer: Signer,
     conversationId: String,
     conversationKey: [UInt8],
     conversationKeyVersion: String,
@@ -288,7 +322,7 @@ extension XChatCore {
     var writer = ThriftWriter()
     holder.write(to: &writer)
     return try encryptAndSign(
-      contentBytes: writer.data, conversationId: conversationId,
+      contentBytes: writer.data, signer: signer, conversationId: conversationId,
       conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion, senderId: senderId,
       messageId: messageId, version: sendVersion,
@@ -297,8 +331,16 @@ extension XChatCore {
     )
   }
 
+  /// Encrypts and signs a send's contents with `signer`. The send has
+  /// taken the signer with `requireSigner`, then checked its key, sender
+  /// id, version and conversation id with `requireSendParameters`, before
+  /// anything else. Both preconditions here rest on those checks: a v1
+  /// message key derives because the sender id is a user id, and the
+  /// signed payload builds because the conversation id, the only
+  /// component a caller passes that can hold a comma, holds none.
   private func encryptAndSign(
     contentBytes: [UInt8],
+    signer: Signer,
     conversationId: String,
     conversationKey: [UInt8],
     conversationKeyVersion: String,
@@ -309,19 +351,6 @@ extension XChatCore {
     ttlMilliseconds: Int64?,
     embeddedSigners: [(senderId: String, publicKeyVersion: String)]
   ) throws -> EncryptedMessagePayload {
-    guard conversationKey.count == 32 else {
-      throw XChatError.invalidInput("Invalid conversation key (expected 32 bytes)")
-    }
-    try validateUserId("sender_id", senderId)
-    try validateKeyVersion("conversation_key_version", conversationKeyVersion)
-    guard let signingPrivateKey else {
-      throw XChatError.invalidState("signing key is not loaded")
-    }
-    guard let signingKeyVersion = keyVersion else {
-      throw XChatError.invalidInput(
-        "signing key version is not set: import keys with its public key version")
-    }
-
     let encrypted: [UInt8]
     let contentsEncryptionVersion: Int16?
     let signatureVersion: Int32
@@ -331,8 +360,15 @@ extension XChatCore {
       contentsEncryptionVersion = nil
       signatureVersion = currentSignatureVersion
     case .v1:
-      let messageKey = try deriveMessageKey(
-        conversationKey: conversationKey, senderId: senderId, messageId: messageId)
+      guard
+        let messageKey = deriveMessageKey(
+          conversationKey: conversationKey, senderId: senderId, messageId: messageId)
+      else {
+        // Only a sender id `Int64(_:)` does not parse leaves the key
+        // underived, and `requireSendParameters` checked that it is a
+        // user id, which parses.
+        preconditionFailure("the sender id was checked to be a user id")
+      }
       encrypted = try XChat.encryptMessage(key: messageKey, plaintext: contentBytes)
       contentsEncryptionVersion = Int16(sendContentsEncryptionVersion)
       signatureVersion = messageSignatureVersion
@@ -365,18 +401,20 @@ extension XChatCore {
     outgoing.messageEventSignature = placeholder
 
     guard let payload = eventSignaturePayload(event: outgoing, detail: detail) else {
-      throw XChatError.invalidInput(
-        "Signature payload contains comma-separated component")
+      // Only a comma in a component leaves a message's payload unbuilt,
+      // and only the conversation id, which `requireSendParameters`
+      // checked, can hold one.
+      preconditionFailure("the conversation id is the only component that can hold a comma")
     }
-    let signature = try sign(privateKey: signingPrivateKey, payload: Array(payload.utf8))
+    let signature = try sign(privateKey: signer.privateKey, payload: Array(payload.utf8))
 
     // v1 signatures name every signer whose key a recipient needs; v0
     // signatures carry none.
     var signers = embeddedSigners
     if !signers.contains(where: {
-      $0.senderId == senderId && $0.publicKeyVersion == signingKeyVersion
+      $0.senderId == senderId && $0.publicKeyVersion == signer.publicKeyVersion
     }) {
-      signers.append((senderId, signingKeyVersion))
+      signers.append((senderId, signer.publicKeyVersion))
     }
     let signingInfos: [MessageSigningKeyInfo]? =
       version == .v1
@@ -389,7 +427,7 @@ extension XChatCore {
 
     let signatureStruct = MessageEventSignature(
       signature: Base64.encodeStandard(signature),
-      publicKeyVersion: signingKeyVersion,
+      publicKeyVersion: signer.publicKeyVersion,
       signatureVersion: String(signatureVersion),
       signingPublicKey: nil,
       messageSigningKeyInfoList: signingInfos)
@@ -411,6 +449,73 @@ extension XChatCore {
       shouldNotify: notify)
   }
 
+  /// The loaded signing key and the public key version it is published
+  /// under, which every send and key change signs with. Each takes them
+  /// before checking anything it is given: nothing can be sent without
+  /// them, whatever the arguments, and checked when signing, their absence
+  /// would be hidden by any failure before it, such as the message a reply
+  /// quotes not opening, or a participant's identity key not being a key.
+  ///
+  /// A core with no keys at all reports `keysNotLoaded`, as every other
+  /// call that needs a key does, and `signingKeyNotLoaded` is left for keys
+  /// imported without a signing key: every import includes the identity
+  /// key, so a core without one has none.
+  private func requireSigner() throws -> Signer {
+    guard let signingPrivateKey else {
+      throw XChatError.invalidState(
+        identityPrivateKey == nil ? .keysNotLoaded : .signingKeyNotLoaded)
+    }
+    guard let keyVersion else {
+      throw XChatError.invalidState(.signingKeyVersionNotSet)
+    }
+    return Signer(privateKey: signingPrivateKey, publicKeyVersion: keyVersion)
+  }
+
+  /// Checks the parameters every send encrypts and signs with: a 32-byte
+  /// conversation key, a sender id and a conversation-key version in
+  /// canonical decimal form, and a conversation id that is not empty and
+  /// has no comma. Every send checks them before anything else it is
+  /// given, so whatever else is wrong, each send reports a malformed key,
+  /// version, sender id or conversation id alike; a reply has to, because
+  /// it opens the message it quotes with that key and compares that
+  /// message's conversation with the reply's.
+  private func requireSendParameters(
+    conversationKey: [UInt8],
+    conversationKeyVersion: String,
+    senderId: String,
+    conversationId: String
+  ) throws {
+    guard conversationKey.count == 32 else {
+      throw XChatError.invalidInput(.conversationKeyLength(conversationKey.count))
+    }
+    guard isUserId(senderId) else {
+      throw XChatError.invalidInput(.senderId(senderId))
+    }
+    guard isKeyVersion(conversationKeyVersion) else {
+      throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
+    }
+    try requireConversationId(conversationId)
+  }
+
+  /// Checks that a conversation id passed to a send or key change names a
+  /// conversation and can be signed: it is not empty, and it holds no
+  /// comma, since the signed payload joins its components with commas,
+  /// without escaping, and the conversation id is the only component a
+  /// caller passes that is not checked to be digits. Checking it with the
+  /// other ids and versions, rather than when signing, reports it before
+  /// what the call builds: the message a reply quotes, which would not be
+  /// in the reply's conversation, or a key change's participants' keys. A
+  /// key change takes an empty id as none and derives one from its
+  /// participants, so it checks only an id that is not empty.
+  private func requireConversationId(_ conversationId: String) throws {
+    guard !conversationId.isEmpty else {
+      throw XChatError.invalidInput(.emptyConversationId)
+    }
+    guard !containsComma(conversationId) else {
+      throw XChatError.invalidInput(.conversationIdContainsComma(conversationId))
+    }
+  }
+
   /// The message id for an outgoing send: a v1 message with files derives
   /// it from what identifies the message; everything else takes a random
   /// id.
@@ -421,13 +526,13 @@ extension XChatCore {
     senderId: String,
     conversationId: String,
     attachments: [AttachmentDescriptor]?
-  ) throws -> String {
+  ) -> String {
     let mediaHashKeys = fileMediaHashKeys(attachments ?? [])
     if version == .v0 || mediaHashKeys.isEmpty {
       return generateMessageId()
     }
     let canonicalId = canonicalConversationId(conversationId, senderId: senderId)
-    return try deriveMediaMessageId(
+    return deriveMediaMessageId(
       conversationKey: conversationKey,
       conversationKeyVersion: conversationKeyVersion,
       senderId: senderId, conversationId: canonicalId,
@@ -487,9 +592,7 @@ extension XChatCore {
       guard entity.start >= 0, entity.end >= entity.start,
         Int(entity.end) <= textByteCount
       else {
-        throw XChatError.invalidInput(
-          "Invalid entity: offsets \(entity.start)..<\(entity.end) are not a range "
-            + "of the text")
+        throw XChatError.invalidInput(.entityRange(start: entity.start, end: entity.end))
       }
       let content: RichTextContent
       switch entity.type {
@@ -522,27 +625,24 @@ extension XChatCore {
         let filename, let mediaType, let durationMilliseconds,
         let plaintextSHA256):
         guard !mediaHashKey.isEmpty else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)].media_hash_key: must not be empty")
+          throw XChatError.invalidInput(.attachment(index: index, .emptyMediaHashKey))
         }
-        guard width >= 0, height >= 0 else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)]: width and height must not be negative")
+        guard width >= 0 else {
+          throw XChatError.invalidInput(.attachment(index: index, .negativeWidth))
+        }
+        guard height >= 0 else {
+          throw XChatError.invalidInput(.attachment(index: index, .negativeHeight))
         }
         guard filesizeBytes > 0 else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)].filesize_bytes: must be positive")
+          throw XChatError.invalidInput(.attachment(index: index, .nonPositiveFilesize))
         }
         guard !filename.isEmpty else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)].filename: must not be empty")
+          throw XChatError.invalidInput(.attachment(index: index, .emptyFilename))
         }
         var mediaTypeValue: MediaType?
         if let mediaType {
           guard let parsed = MediaType(rawValue: mediaType) else {
-            throw XChatError.invalidInput(
-              "Invalid attachments[\(index)].media_type: \(mediaType) is not a "
-                + "media type")
+            throw XChatError.invalidInput(.attachment(index: index, .unknownMediaType(mediaType)))
           }
           mediaTypeValue = parsed
         }
@@ -552,9 +652,7 @@ extension XChatCore {
             let decoded = try? Base64.decodeStandard(plaintextSHA256),
             decoded.count == 32
           else {
-            throw XChatError.invalidInput(
-              "Invalid attachments[\(index)].plaintext_sha256: pass the base64 "
-                + "SHA-256 of the file's plaintext bytes")
+            throw XChatError.invalidInput(.attachment(index: index, .plaintextSHA256))
           }
           plaintextHash = decoded
         }
@@ -574,25 +672,23 @@ extension XChatCore {
 
       case .url(let url, let displayTitle, let bannerImage, let faviconImage):
         guard !url.isEmpty else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)].url: must not be empty")
+          throw XChatError.invalidInput(.attachment(index: index, .emptyURL))
         }
         return .url(
           UrlAttachment(
             url: url,
             bannerImage: try bannerImage.map {
-              try buildUrlImage($0, index: index)
+              try buildUrlImage($0, .banner, index: index)
             },
             faviconImage: try faviconImage.map {
-              try buildUrlImage($0, index: index)
+              try buildUrlImage($0, .favicon, index: index)
             },
             displayTitle: displayTitle,
             attachmentId: attachmentId))
 
       case .post(let restId, let postURL):
         guard restId?.isEmpty == false || postURL?.isEmpty == false else {
-          throw XChatError.invalidInput(
-            "Invalid attachments[\(index)]: a post needs rest_id, post_url, or both")
+          throw XChatError.invalidInput(.attachment(index: index, .postWithoutReference))
         }
         return .post(
           PostAttachment(
@@ -602,28 +698,16 @@ extension XChatCore {
   }
 
   private func buildUrlImage(
-    _ image: UrlAttachmentImageDescriptor, index: Int
+    _ image: UrlAttachmentImageDescriptor, _ which: XChatError.CardImage, index: Int
   ) throws -> UrlAttachmentImage {
-    guard !image.mediaHashKey.isEmpty else {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image media_hash_key: must not be empty")
+    func invalid(_ failure: XChatError.CardImageFailure) -> XChatError {
+      .invalidInput(.attachment(index: index, .cardImage(which, failure)))
     }
-    guard image.filesizeBytes > 0 else {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image filesize_bytes: must be positive")
-    }
-    guard !image.filename.isEmpty else {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image filename: must not be empty")
-    }
-    if let width = image.width, width < 0 {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image width: must not be negative")
-    }
-    if let height = image.height, height < 0 {
-      throw XChatError.invalidInput(
-        "Invalid attachments[\(index)] image height: must not be negative")
-    }
+    guard !image.mediaHashKey.isEmpty else { throw invalid(.emptyMediaHashKey) }
+    guard image.filesizeBytes > 0 else { throw invalid(.nonPositiveFilesize) }
+    guard !image.filename.isEmpty else { throw invalid(.emptyFilename) }
+    if let width = image.width, width < 0 { throw invalid(.negativeWidth) }
+    if let height = image.height, height < 0 { throw invalid(.negativeHeight) }
     let dimensions: MediaDimensions? =
       image.width != nil || image.height != nil
       ? MediaDimensions(width: image.width, height: image.height)
@@ -669,34 +753,45 @@ extension XChatCore {
   ) {
     let raw = try parseEvent(replyToEventB64)
     guard raw.conversationId == conversationId else {
-      throw XChatError.invalidInput("the reply target belongs to a different conversation")
+      throw XChatError.invalidInput(.quotedMessageInOtherConversation)
     }
-    guard case .messageCreate(let create)? = raw.detail, let contents = create.contents else {
-      throw XChatError.invalidInput("the reply target is not a message event")
+    guard case .messageCreate(let create)? = raw.detail else {
+      throw XChatError.invalidInput(.notMessageEvent(.quotedMessage))
+    }
+    guard let contents = create.contents else {
+      throw XChatError.invalidInput(.noContents(.quotedMessage))
     }
     guard let sequenceId = raw.sequenceId else {
-      throw XChatError.invalidInput("the reply target event carries no sequence_id")
+      throw XChatError.invalidInput(.quotedMessageWithoutSequenceId)
     }
-    let key = try quotedContentsKey(
-      raw, conversationKey: conversationKey,
-      conversationKeyVersion: conversationKeyVersion,
-      replyToConversationKeys: replyToConversationKeys)
     let plaintext: [UInt8]
-    if let key {
-      plaintext = try decryptMessage(key: key, ciphertext: contents)
+    var carriedKey: [UInt8]?
+    if let version = create.conversationKeyVersion {
+      let key = try quotedContentsKey(
+        raw, version: version, conversationKey: conversationKey,
+        conversationKeyVersion: conversationKeyVersion,
+        replyToConversationKeys: replyToConversationKeys)
+      plaintext = try decryptContents(
+        contents, key: key, of: .quotedMessage, from: .conversationKey(version: version))
+      // A message-key original travels with its key, so recipients
+      // without that conversation key can still validate it.
+      if usesMessageKey(raw) {
+        carriedKey = key
+      }
     } else {
+      // An unencrypted message's contents are plaintext Thrift already.
       plaintext = contents
     }
-    var reader = ThriftReader(plaintext)
-    let holder: MessageEntryHolder
-    do {
-      holder = try MessageEntryHolder.read(&reader)
-    } catch {
-      throw XChatError.parse(
-        "Content parse error: \((error as? XChatError)?.message ?? String(describing: error))")
-    }
-    guard case .message(let original)? = holder.contents else {
-      throw XChatError.invalidInput("the reply target is not a text message")
+    let holder = try readThrift(
+      plaintext, as: { .messageContents(.quotedMessage, $0) }, MessageEntryHolder.read)
+    let original: MessageContents
+    switch holder.contents {
+    case .message(let message):
+      original = message
+    case .messageEdit:
+      throw XChatError.invalidInput(.messageIsEdit(.quotedMessage))
+    default:
+      throw XChatError.invalidInput(.notTextMessage(.quotedMessage))
     }
 
     var preview = ReplyingToPreview()
@@ -708,9 +803,7 @@ extension XChatCore {
     preview.messageId = raw.messageId
     preview.attachmentId = replyToAttachmentId
     preview.rawEventMessageCreate = raw
-    if usesMessageKey(raw) {
-      preview.rawEventMessageKey = key
-    }
+    preview.rawEventMessageKey = carriedKey
 
     var signers: [(senderId: String, publicKeyVersion: String)] = []
     if let senderId = raw.senderId,
@@ -721,28 +814,27 @@ extension XChatCore {
     return (preview, signers)
   }
 
-  /// Resolves the key for the quoted message, or returns nil for unencrypted contents.
+  /// The key the quoted message's contents are encrypted under: the
+  /// conversation key for `version`, the version they are encrypted under,
+  /// or the per-message key derived from it.
   private func quotedContentsKey(
     _ raw: MessageEvent,
+    version: String,
     conversationKey: [UInt8],
     conversationKeyVersion: String,
     replyToConversationKeys: [String: [UInt8]]
-  ) throws -> [UInt8]? {
-    guard case .messageCreate(let create)? = raw.detail,
-      let version = create.conversationKeyVersion
-    else { return nil }
+  ) throws -> [UInt8] {
     let quotedKey =
       version == conversationKeyVersion
       ? conversationKey : replyToConversationKeys[version]
     guard let quotedKey else {
+      let available = Set(replyToConversationKeys.keys).union([conversationKeyVersion])
       throw XChatError.decryption(
-        "missing conversation key version '\(version)' for the reply target")
+        .missingConversationKey(
+          .quotedMessage, version: version, available: keyVersionsInOrder(available)))
     }
     if usesMessageKey(raw) {
-      return try deriveMessageKey(
-        conversationKey: quotedKey,
-        senderId: raw.senderId ?? "",
-        messageId: raw.messageId ?? "")
+      return try messageKey(of: raw, conversationKey: quotedKey, role: .quotedMessage)
     }
     return quotedKey
   }
@@ -764,14 +856,14 @@ extension XChatCore {
 
   private func requireSequenceId(_ value: String) throws -> String {
     guard !value.isEmpty else {
-      throw XChatError.invalidInput("Invalid target message sequence id: must not be empty")
+      throw XChatError.invalidInput(.emptyTargetSequenceId)
     }
     return value
   }
 
   private func requireEmoji(_ value: String) throws -> String {
     guard !value.isEmpty else {
-      throw XChatError.invalidInput("Invalid reaction emoji: must not be empty")
+      throw XChatError.invalidInput(.emptyReactionEmoji)
     }
     return value
   }
@@ -803,23 +895,23 @@ private func isDigits(_ value: String) -> Bool {
   !value.isEmpty && value.allSatisfy { $0.isASCII && $0.isNumber }
 }
 
-/// Checks a user id in canonical decimal form: digits, no leading zero, a
-/// positive 64-bit integer.
-private func validateUserId(_ field: String, _ value: String) throws {
-  let canonical = Int64(value).map(String.init)
-  guard canonical == value, let number = Int64(value), number > 0 else {
-    throw XChatError.invalidInput(
-      "Invalid \(field) '\(value)': pass a numeric user id (digits only)")
-  }
+/// Whether `value` is a user id in canonical decimal form: digits, no
+/// leading zero, a positive 64-bit integer.
+private func isUserId(_ value: String) -> Bool {
+  guard let number = Int64(value) else { return false }
+  return String(number) == value && number > 0
 }
 
-/// Checks a key version as the X API returns it: a non-negative integer in
-/// canonical decimal form.
-private func validateKeyVersion(_ field: String, _ value: String) throws {
-  let canonical = Int64(value).map(String.init)
-  guard canonical == value, let number = Int64(value), number >= 0 else {
-    throw XChatError.invalidInput(
-      "Invalid \(field) '\(value)': pass the key version as the X API returns it, "
-        + "an integer in digits")
-  }
+/// Whether `value` is a key version as the X API returns it: a
+/// non-negative integer in canonical decimal form.
+func isKeyVersion(_ value: String) -> Bool {
+  guard let number = Int64(value) else { return false }
+  return String(number) == value && number >= 0
+}
+
+/// The key a send or key change is signed with, and the public key version
+/// it is published under, as `requireSigner` takes them from the state.
+private struct Signer {
+  var privateKey: [UInt8]
+  var publicKeyVersion: String
 }

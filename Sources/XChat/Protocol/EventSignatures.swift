@@ -40,10 +40,12 @@ enum EventSignatureCheck: Sendable, Equatable {
   /// The signature matched the key at the event's key version.
   case verified
   /// There was nothing to check: no signature, no key at that version, or
-  /// no payload layout for the event type.
+  /// no payload rebuilt from the event, because its type has no layout, it
+  /// lacks a field the layout signs, a key change's conversation-key
+  /// version is not an integer, or a field contains a comma.
   case unverifiable
-  /// A signature is present but cannot be accepted; the string is why.
-  case failed(String)
+  /// A signature is present but cannot be accepted, for the given reason.
+  case failed(XChatError.SignatureFailure)
 }
 
 /// The signature version an event carries, when it is an integer.
@@ -110,7 +112,8 @@ private func componentPayloadForDetail(
 
   case .conversationKeyChange(let change):
     // The key version signs as its integer value; a key change without
-    // one has no payload.
+    // one, or with one that is not an integer, has no payload. (A message
+    // signs a version that is not an integer as "null" instead.)
     guard let versionString = change.conversationKeyVersion,
       let keyVersion = Int64(versionString)
     else { return nil }
@@ -165,12 +168,26 @@ private func componentPayload(
   var parts = [eventName, messageId, senderId]
   if let conversationId { parts.append(conversationId) }
   parts.append(contentsOf: additional)
-  if parts.contains(where: { $0.contains(",") }) { return nil }
+  if parts.contains(where: containsComma) { return nil }
   return parts.joined(separator: ",")
+}
+
+/// Whether `component` would put a comma byte into the signed payload, the
+/// one check both the payload and the sends that refuse a conversation id
+/// make, so a send refuses every id its payload could not be built from.
+///
+/// It looks at the UTF-8, not at the characters: a comma followed by a
+/// combining mark (`",\u{301}"`) is one `Character` that is not `","`, so
+/// `String.contains(",")` does not find it, while the bytes signed still
+/// hold the comma.
+func containsComma(_ component: String) -> Bool {
+  component.utf8.contains(UInt8(ascii: ","))
 }
 
 /// Checks an event's signature against the known signing keys.
 ///
+/// `signingKeys` are the event's sender's, so a rejection names the key by
+/// the event's sender id and the key version, as `SigningKeyEntry` does.
 /// The key is chosen by the `public_key_version` the event's signature
 /// names; the payload is rebuilt from the event in its signature version's
 /// layout, so a signature the reference produced verifies here without any
@@ -186,24 +203,22 @@ func checkEventSignature(
   else { return .unverifiable }
 
   guard let version = signatureVersion(of: event) else {
-    return .failed("signature_version is missing or not an integer")
+    return .failed(.missingSignatureVersion)
   }
   guard version >= minimumSignatureVersion else {
-    return .failed(
-      "signature_version \(version) is no longer accepted "
-        + "(minimum: \(minimumSignatureVersion))")
+    return .failed(.signatureVersionTooOld(version, minimum: minimumSignatureVersion))
   }
   guard version <= maximumSignatureVersion else {
-    return .failed(
-      "signature_version \(version) is not supported "
-        + "(maximum: \(maximumSignatureVersion))")
+    return .failed(.signatureVersionUnsupported(version, maximum: maximumSignatureVersion))
   }
 
   let keyVersion = signature.publicKeyVersion ?? ""
   guard let entry = signingKeys.first(where: { $0.publicKeyVersion == keyVersion }) else {
     return .unverifiable
   }
-  guard
+  // The payload signs the sender id, so requiring it here to name the key
+  // leaves no more events unverifiable.
+  guard let senderId = event.senderId,
     let payload = eventSignaturePayload(
       event: event, detail: detail,
       plaintextConversationKeyB64: plaintextConversationKeyB64)
@@ -217,16 +232,24 @@ func checkEventSignature(
     {
       return .verified
     }
-    return .failed(
-      "ECDSA mismatch: key_version=\(keyVersion), payload_len=\(payload.utf8.count)")
+    return .failed(.mismatch(senderId: senderId, keyVersion: keyVersion))
+  } catch PrimitiveError.malformedSignature {
+    return .failed(.malformedSignature)
   } catch {
-    let reason = (error as? XChatError)?.message ?? String(describing: error)
-    return .failed("verify error: \(reason)")
+    // Everything else `verify` and the base64 decoding throw is about the
+    // signing key: it is not base64, or not a P-256 public key.
+    return .failed(.invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion))
   }
 }
 
 /// Signs an event's payload at `signatureVersion`, returning the signature
 /// struct the event carries and the payload that was signed.
+///
+/// The caller passes every field the layout signs, none with a comma. Of
+/// a key change's components, only the conversation id can hold one, and
+/// `prepareConversationKeyChange` checks it first
+/// (`InputFailure.conversationIdContainsComma`); the others are ids and
+/// versions checked to be digits, a minted message id, and base64.
 func signEventSignature(
   signingPrivateKey: [UInt8],
   publicKeyVersion: String,
@@ -250,11 +273,11 @@ func signEventSignature(
       event: event, detail: detail,
       plaintextConversationKeyB64: plaintextConversationKeyB64)
   else {
-    throw XChatError.invalidInput("Signature payload contains comma-separated component")
+    preconditionFailure("the payload of an event being signed has every field and no comma")
   }
 
   let signature = try sign(privateKey: signingPrivateKey, payload: Array(payload.utf8))
-  let publicKey = try derivePublicKey(privateKey: signingPrivateKey)
+  let publicKey = try derivePublicKey(privateKey: signingPrivateKey, purpose: .signing)
   let signatureStruct = MessageEventSignature(
     signature: Base64.encodeStandard(signature),
     publicKeyVersion: publicKeyVersion,

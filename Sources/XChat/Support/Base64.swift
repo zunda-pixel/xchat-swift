@@ -82,15 +82,18 @@ public enum Base64 {
         continue
       }
       if padding > 0 {
-        throw XChatError.parse("Invalid base64: '=' is followed by data")
+        throw XChatError.parse(.base64(.dataAfterPadding))
       }
       if c >= 128 || table[Int(c)] == 0xFF {
-        throw XChatError.parse("Invalid base64 character: \(String(UnicodeScalar(c)))")
+        throw XChatError.parse(.base64(.invalidByte(c)))
       }
       chars.append(c)
     }
-    if padding > 2 || chars.count % 4 == 1 {
-      throw XChatError.parse("Invalid base64 length: \(chars.count + padding)")
+    if chars.count % 4 == 1 {
+      throw XChatError.parse(.base64(.invalidLength(chars.count)))
+    }
+    if padding > 2 {
+      throw XChatError.parse(.base64(.excessPadding(padding)))
     }
     var out = [UInt8]()
     out.reserveCapacity(chars.count / 4 * 3)

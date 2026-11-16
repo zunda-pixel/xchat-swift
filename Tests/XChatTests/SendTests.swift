@@ -47,7 +47,7 @@ final class SendTests: XCTestCase {
       conversationKeys: [Self.conversationKeyVersion: Self.conversationKey],
       signingKeys: [signingKey])
     guard case .message(let message) = event else {
-      throw XChatError.parse("expected a message event")
+      return try XCTUnwrap(nil, "expected a message event, got \(event)")
     }
     return message
   }
@@ -356,17 +356,15 @@ final class SendTests: XCTestCase {
     }
 
     XCTAssertThrowsError(try send(key: [UInt8](repeating: 0, count: 31))) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
-      XCTAssertEqual(
-        (error as? XChatError)?.message, "Invalid conversation key (expected 32 bytes)")
+      XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(31)))
     }
     XCTAssertThrowsError(try send(version: "01")) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyVersion("01")))
     }
     XCTAssertThrowsError(
       try send(entities: [EntityDescriptor(start: 0, end: 5, type: .hashtag)])
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(error as? XChatError, .invalidInput(.entityRange(start: 0, end: 5)))
     }
     XCTAssertThrowsError(
       try send(attachments: [
@@ -376,14 +374,16 @@ final class SendTests: XCTestCase {
           plaintextSHA256: nil)
       ])
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(
+        error as? XChatError, .invalidInput(.attachment(index: 0, .nonPositiveFilesize)))
     }
     XCTAssertThrowsError(
       try send(attachments: [
         .post(restId: nil, postURL: nil)
       ])
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(
+        error as? XChatError, .invalidInput(.attachment(index: 0, .postWithoutReference)))
     }
 
     // Sending needs a signing key and its version.
@@ -396,7 +396,7 @@ final class SendTests: XCTestCase {
         conversationKeyVersion: Self.conversationKeyVersion,
         senderId: Self.senderId)
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidState)
+      XCTAssertEqual(error as? XChatError, .invalidState(.signingKeyNotLoaded))
     }
   }
 }

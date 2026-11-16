@@ -66,12 +66,13 @@ final class EventSignatureTests: XCTestCase {
       publicKeyVersion: Self.signingKey.publicKeyVersion,
       publicKey: Base64.encodeStandard(generateKeyPair().publicKey))
     guard
-      case .failed(let reason) = checkEventSignature(
+      case .failed(.mismatch(let senderId, let keyVersion)) = checkEventSignature(
         event: event, detail: try detail(of: event), signingKeys: [otherKey])
     else {
       return XCTFail("expected a signature mismatch")
     }
-    XCTAssertTrue(reason.hasPrefix("ECDSA mismatch"), reason)
+    XCTAssertEqual(senderId, event.senderId)
+    XCTAssertEqual(keyVersion, Self.signingKey.publicKeyVersion)
 
     // A key known under a different version leaves the event unverifiable.
     let unknownVersion = SigningKey(
@@ -86,7 +87,7 @@ final class EventSignatureTests: XCTestCase {
     var event = try decodeEvent("event_message_b64")
     event.messageId = "2c2a1d32-0000-0000-0000-000000000000"
     guard
-      case .failed = checkEventSignature(
+      case .failed(.mismatch) = checkEventSignature(
         event: event, detail: try detail(of: event), signingKeys: [Self.signingKey])
     else {
       return XCTFail("expected a signature mismatch")
@@ -251,25 +252,13 @@ final class EventSignatureTests: XCTestCase {
       eventSignaturePayload(event: unsupported, detail: try detail(of: unsupported)))
   }
 
-  /// A comma in any component makes the payload ambiguous, so it is
-  /// refused when building and unverifiable when checking.
+  /// A comma in any component makes the payload ambiguous, so no payload
+  /// is built, and a received event with one is unverifiable. Sends refuse
+  /// a conversation id with a comma, the only component a caller passes
+  /// that can hold one, before signing (`conversationIdContainsComma`).
   func testCommaInComponentIsRefused() throws {
     let event = messageEvent(messageId: "m,1", signatureVersion: "7")
-    XCTAssertThrowsError(
-      try signEventSignature(
-        signingPrivateKey: generateKeyPair().privateKey,
-        publicKeyVersion: "1",
-        messageId: "m,1",
-        senderId: "s",
-        conversationId: "c",
-        signatureVersion: 7,
-        detail: try detail(of: event))
-    ) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, .invalidInput)
-      XCTAssertEqual(
-        error?.message, "Signature payload contains comma-separated component")
-    }
+    XCTAssertNil(eventSignaturePayload(event: event, detail: try detail(of: event)))
     XCTAssertEqual(
       checkEventSignature(
         event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
@@ -283,20 +272,20 @@ final class EventSignatureTests: XCTestCase {
     XCTAssertEqual(
       checkEventSignature(
         event: tooOld, detail: try detail(of: tooOld), signingKeys: [Self.signingKey]),
-      .failed("signature_version 1 is no longer accepted (minimum: 2)"))
+      .failed(.signatureVersionTooOld(1, minimum: 2)))
 
     let tooNew = messageEvent(signatureVersion: "12")
     XCTAssertEqual(
       checkEventSignature(
         event: tooNew, detail: try detail(of: tooNew), signingKeys: [Self.signingKey]),
-      .failed("signature_version 12 is not supported (maximum: 11)"))
+      .failed(.signatureVersionUnsupported(12, maximum: 11)))
 
     let unversioned = messageEvent(signatureVersion: nil)
     XCTAssertEqual(
       checkEventSignature(
         event: unversioned, detail: try detail(of: unversioned),
         signingKeys: [Self.signingKey]),
-      .failed("signature_version is missing or not an integer"))
+      .failed(.missingSignatureVersion))
   }
 
   // MARK: Signing round trips
@@ -376,7 +365,7 @@ final class EventSignatureTests: XCTestCase {
     // With the wrong key the payload differs and verification fails.
     let wrongKey = Base64.encodeStandard([UInt8](repeating: 7, count: 32))
     guard
-      case .failed = checkEventSignature(
+      case .failed(.mismatch) = checkEventSignature(
         event: event, detail: detail, signingKeys: [signingKey],
         plaintextConversationKeyB64: wrongKey)
     else {

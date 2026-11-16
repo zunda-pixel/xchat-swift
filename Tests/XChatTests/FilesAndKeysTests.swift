@@ -111,11 +111,7 @@ final class FilesAndKeysTests: XCTestCase {
         conversationKeys: [:],
         mediaHashKey: TestVectors.string("media_unencrypted_hash_key"))
     ) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
-      XCTAssertEqual(
-        (error as? XChatError)?.message,
-        "the message is not encrypted, so neither is its media: "
-          + "use the downloaded bytes as they are")
+      XCTAssertEqual(error as? XChatError, .invalidInput(.notEncrypted(.message)))
     }
   }
 
@@ -126,13 +122,15 @@ final class FilesAndKeysTests: XCTestCase {
         [1, 2, 3], eventB64: TestVectors.string("event_message_key_b64"),
         conversationKeys: try Self.messageKeyMap(), mediaHashKey: "not-a-hash")
     ) { error in
-      let message = (error as? XChatError)?.message ?? ""
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
-      XCTAssertTrue(
-        message.hasPrefix(
-          "media_hash_key 'not-a-hash' is not in the message, whose media hash keys are "),
-        message)
-      XCTAssertTrue(message.contains(TestVectors.string("media_first_hash_key")), message)
+      XCTAssertEqual(
+        error as? XChatError,
+        .invalidInput(
+          .mediaHashKeyNotFound(
+            "not-a-hash",
+            available: [
+              TestVectors.string("media_first_hash_key"),
+              TestVectors.string("media_second_hash_key"),
+            ])))
     }
   }
 
@@ -145,13 +143,9 @@ final class FilesAndKeysTests: XCTestCase {
         conversationKeys: ["1": [UInt8](repeating: 0, count: 32)],
         mediaHashKey: TestVectors.string("media_first_hash_key"))
     ) { error in
-      let message = (error as? XChatError)?.message ?? ""
-      XCTAssertEqual((error as? XChatError)?.kind, .decryption)
-      XCTAssertTrue(
-        message.hasPrefix(
-          "conversationKeys has no key for version '2002', which the message is "
-            + "encrypted under"),
-        message)
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(.missingConversationKey(.message, version: "2002", available: ["1"])))
     }
   }
 
@@ -220,10 +214,9 @@ final class FilesAndKeysTests: XCTestCase {
         conversationKey: TestVectors.bytes("conversation_key_b64"),
         conversationKeyVersion: "1001", mediaHashKey: "nope")
     ) { error in
-      let message = (error as? XChatError)?.message ?? ""
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
-      XCTAssertTrue(
-        message.hasPrefix("media_hash_key 'nope' is not one of the message's files"), message)
+      XCTAssertEqual(
+        error as? XChatError,
+        .invalidInput(.mediaHashKeyNotFound("nope", available: [mediaHashKey])))
     }
   }
 
@@ -245,10 +238,7 @@ final class FilesAndKeysTests: XCTestCase {
         conversationKey: TestVectors.bytes("conversation_key_b64"),
         conversationKeyVersion: "1001", mediaHashKey: "h")
     ) { error in
-      XCTAssertEqual(
-        (error as? XChatError)?.message,
-        "the message is an edit, and edits carry no media: "
-          + "pass the event of the message that was edited")
+      XCTAssertEqual(error as? XChatError, .invalidInput(.messageIsEdit(.message)))
     }
   }
 
@@ -262,24 +252,21 @@ final class FilesAndKeysTests: XCTestCase {
     let encrypted = try core.encryptFileWithKey(file, key: key)
     XCTAssertEqual(try core.decryptFileWithKey(encrypted, key: key), file)
 
-    // A wrong key cannot open it, and the error says what to pass.
+    // A wrong key cannot open it: its first frame does not authenticate.
     let otherKey = randomBytes(32)
     XCTAssertThrowsError(try core.decryptFileWithKey(encrypted, key: otherKey)) { error in
-      let message = (error as? XChatError)?.message ?? ""
-      XCTAssertEqual((error as? XChatError)?.kind, .decryption)
-      XCTAssertTrue(
-        message.hasPrefix(
-          "the bytes are not a complete file encrypted under this key"),
-        message)
+      XCTAssertEqual(
+        error as? XChatError,
+        .decryption(.file(.authenticationFailed, mediaHashKey: nil)))
     }
 
     for badKey in [[UInt8](repeating: 0, count: 31), [UInt8](repeating: 0, count: 33)] {
       XCTAssertThrowsError(try core.encryptFileWithKey(file, key: badKey)) { error in
-        XCTAssertEqual(
-          (error as? XChatError)?.message,
-          "Invalid key (expected 32 bytes, got \(badKey.count))")
+        XCTAssertEqual(error as? XChatError, .invalidInput(.fileKeyLength(badKey.count)))
       }
-      XCTAssertThrowsError(try core.decryptFileWithKey(encrypted, key: badKey))
+      XCTAssertThrowsError(try core.decryptFileWithKey(encrypted, key: badKey)) { error in
+        XCTAssertEqual(error as? XChatError, .invalidInput(.fileKeyLength(badKey.count)))
+      }
     }
   }
 
@@ -332,7 +319,7 @@ final class FilesAndKeysTests: XCTestCase {
     try core.setPublicKeyVersion("123")
     XCTAssertEqual(core.publicKeyVersion, "123")
     XCTAssertThrowsError(try core.setPublicKeyVersion("0123")) { error in
-      XCTAssertEqual((error as? XChatError)?.kind, .invalidInput)
+      XCTAssertEqual(error as? XChatError, .invalidInput(.publicKeyVersion("0123")))
     }
   }
 

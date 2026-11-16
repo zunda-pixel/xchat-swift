@@ -1,29 +1,38 @@
 import Foundation
 
-/// Thrift binary-protocol field types, with the byte values the wire uses.
-///
-/// Booleans are `0x02` in a field header followed by a separate value byte;
-/// only the compact protocol folds the value into the type. Unknown type
-/// bytes are rejected rather than skipped.
-enum ThriftType: UInt8, Sendable {
-  case stop = 0x00
-  case void = 0x01
-  case bool = 0x02
-  case byte = 0x03
-  case double = 0x04
-  case i16 = 0x06
-  case i32 = 0x08
-  case i64 = 0x0a
-  case binary = 0x0b
-  case structure = 0x0c
-  case map = 0x0d
-  case set = 0x0e
-  case list = 0x0f
-  case uuid = 0x10
+extension XChatError {
+  /// Thrift binary-protocol field types, with the byte values the wire
+  /// uses. Parse errors name these types.
+  ///
+  /// Booleans are `0x02` in a field header followed by a separate value
+  /// byte; only the compact protocol folds the value into the type. Unknown
+  /// type bytes are rejected rather than skipped.
+  public enum ThriftType: UInt8, Sendable, Hashable {
+    case stop = 0x00
+    case void = 0x01
+    case bool = 0x02
+    case byte = 0x03
+    case double = 0x04
+    case i16 = 0x06
+    case i32 = 0x08
+    case i64 = 0x0a
+    case binary = 0x0b
+    case structure = 0x0c
+    case map = 0x0d
+    case set = 0x0e
+    case list = 0x0f
+    case uuid = 0x10
+  }
+}
 
+/// The Thrift code names wire types without the `XChatError.` prefix; the
+/// type is nested there because only parse errors expose it.
+typealias ThriftType = XChatError.ThriftType
+
+extension ThriftType {
   init(wire: UInt8) throws {
     guard let type = ThriftType(rawValue: wire) else {
-      throw XChatError.parse("Thrift input has an unknown type: \(wire)")
+      throw ThriftError(.unknownType(wire))
     }
     self = type
   }
@@ -35,12 +44,38 @@ struct ThriftField: Sendable, Equatable {
   let type: ThriftType
 }
 
+/// What the Thrift reader throws. Only the reader's callers know what was
+/// being read (an event, or a message's contents), so they wrap the failure
+/// in the matching `XChatError.ParseFailure`; see `readThrift`.
+struct ThriftError: Error {
+  var failure: XChatError.ThriftFailure
+
+  init(_ failure: XChatError.ThriftFailure) {
+    self.failure = failure
+  }
+}
+
+/// Reads one value from `bytes` with `read`, reporting a malformed encoding
+/// as `XChatError.parse(context(failure))`.
+func readThrift<T>(
+  _ bytes: [UInt8],
+  as context: (XChatError.ThriftFailure) -> XChatError.ParseFailure,
+  _ read: (inout ThriftReader) throws -> T
+) throws -> T {
+  var reader = ThriftReader(bytes)
+  do {
+    return try read(&reader)
+  } catch let error as ThriftError {
+    throw XChatError.parse(context(error.failure))
+  }
+}
+
 /// Maximum elements in one list, set, or map.
 private let maximumContainerElements = 10_000
 
 /// Maximum cumulative container elements across one document, so nested
 /// containers cannot multiply the per-container cap.
-private let maximumTotalElements: UInt64 = 100_000
+private let maximumTotalElements = 100_000
 
 /// Maximum string or binary length, matching the reference's default.
 private let maximumBinarySize = 100 * 1024 * 1024
@@ -57,7 +92,7 @@ struct ThriftReader {
   private let bytes: [UInt8]
   private var offset = 0
   /// Running total of declared container elements in this document.
-  private var totalElements: UInt64 = 0
+  private var totalElements = 0
 
   init(_ bytes: [UInt8]) {
     self.bytes = bytes
@@ -103,11 +138,10 @@ struct ThriftReader {
   mutating func readBinary() throws -> [UInt8] {
     let length = try readI32()
     guard length >= 0 else {
-      throw XChatError.parse("Thrift input has a negative size: \(length)")
+      throw ThriftError(.negativeSize(.binary, Int(length)))
     }
     guard Int(length) <= maximumBinarySize else {
-      throw XChatError.parse(
-        "Thrift input size \(length) exceeds maximum \(maximumBinarySize)")
+      throw ThriftError(.sizeExceedsMaximum(.binary, Int(length), maximum: maximumBinarySize))
     }
     return Array(try readBytes(Int(length)))
   }
@@ -115,7 +149,7 @@ struct ThriftReader {
   mutating func readString() throws -> String {
     let bytes = try readBinary()
     guard let string = String(bytes: bytes, encoding: .utf8) else {
-      throw XChatError.parse("Thrift input has invalid UTF-8")
+      throw ThriftError(.invalidUTF8)
     }
     return string
   }
@@ -132,12 +166,12 @@ struct ThriftReader {
 
   mutating func readListBegin() throws -> (elementType: ThriftType, count: Int) {
     let elementType = try ThriftType(wire: try readUInt8())
-    return (elementType, try readContainerCount("list"))
+    return (elementType, try readContainerCount(.list))
   }
 
   mutating func readSetBegin() throws -> (elementType: ThriftType, count: Int) {
     let elementType = try ThriftType(wire: try readUInt8())
-    return (elementType, try readContainerCount("set"))
+    return (elementType, try readContainerCount(.set))
   }
 
   mutating func readMapBegin() throws -> (
@@ -145,15 +179,14 @@ struct ThriftReader {
   ) {
     let keyType = try ThriftType(wire: try readUInt8())
     let valueType = try ThriftType(wire: try readUInt8())
-    return (keyType, valueType, try readContainerCount("map"))
+    return (keyType, valueType, try readContainerCount(.map))
   }
 
   /// Skips one value of `type`, recursing into containers up to a bounded
   /// depth so a hostile encoding cannot exhaust the stack.
   mutating func skip(_ type: ThriftType, depth: Int = 0) throws {
     guard depth <= maximumRecursionDepth else {
-      throw XChatError.parse(
-        "Thrift nesting exceeds maximum depth \(maximumRecursionDepth)")
+      throw ThriftError(.nestingTooDeep(maximum: maximumRecursionDepth))
     }
     switch type {
     case .stop, .void:
@@ -200,27 +233,28 @@ struct ThriftReader {
 
   // MARK: Internals
 
-  private mutating func readContainerCount(_ kind: String) throws -> Int {
-    let count = try readI32()
+  private mutating func readContainerCount(_ container: ThriftType) throws -> Int {
+    let count = Int(try readI32())
     guard count >= 0 else {
-      throw XChatError.parse("Thrift \(kind) has a negative size: \(count)")
+      throw ThriftError(.negativeSize(container, count))
     }
     guard count <= maximumContainerElements else {
-      throw XChatError.parse(
-        "Thrift \(kind) size \(count) exceeds maximum \(maximumContainerElements)")
+      throw ThriftError(
+        .sizeExceedsMaximum(container, count, maximum: maximumContainerElements))
     }
-    totalElements = totalElements &+ UInt64(count)
+    // Each count is at most the per-container cap and the total is checked
+    // after every addition, so it stays far below Int's range.
+    totalElements += count
     guard totalElements <= maximumTotalElements else {
-      throw XChatError.parse(
-        "Thrift cumulative container elements \(totalElements) exceed maximum "
-          + "\(maximumTotalElements)")
+      throw ThriftError(
+        .totalElementsExceedMaximum(totalElements, maximum: maximumTotalElements))
     }
-    return Int(count)
+    return count
   }
 
   private mutating func readUInt8() throws -> UInt8 {
     guard offset < bytes.count else {
-      throw XChatError.parse("Thrift input ended unexpectedly")
+      throw ThriftError(.unexpectedEnd)
     }
     let value = bytes[offset]
     offset += 1
@@ -229,7 +263,7 @@ struct ThriftReader {
 
   private mutating func readBytes(_ count: Int) throws -> ArraySlice<UInt8> {
     guard count <= bytes.count - offset else {
-      throw XChatError.parse("Thrift input ended unexpectedly")
+      throw ThriftError(.unexpectedEnd)
     }
     let slice = bytes[offset..<offset + count]
     offset += count

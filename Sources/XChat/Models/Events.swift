@@ -266,15 +266,20 @@ public struct DecryptedEvent: Sendable {
 }
 
 /// The batch decryption result: decrypted events, adopted conversation
-/// keys, and per-index error messages for the events left out.
+/// keys, and the error for each event left out, by its index in the batch.
 public struct DecryptEventsResult: Sendable {
   public var events: [DecryptedEvent]
   public var conversationKeys: ConversationKeySet
-  public var errors: [Int: String]
+  public var errors: [Int: XChatError]
 }
 
 /// A signing key the verifier knows, with the optional identity-key binding
 /// that registration publishes for it.
+///
+/// A key given with any of the binding fields set is used only when
+/// `signingPublicKeySignature` is `identityPublicKey`'s signature over the
+/// signing key; otherwise it is not used, and an event that only it could
+/// verify is unverifiable (`XChatError.VerificationFailure.unverifiable`).
 public struct SigningKeyEntry: Sendable, Equatable {
   /// User the key belongs to; events verify only against their sender's
   /// keys.

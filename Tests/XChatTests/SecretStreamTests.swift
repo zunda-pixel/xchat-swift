@@ -125,9 +125,7 @@ final class SecretStreamTests: XCTestCase {
 
     var pull = try SecretStreamPull(header: header, key: key)
     XCTAssertThrowsError(try pull.pull(frame, associatedData: Array("wrong".utf8))) { error in
-      let error = error as? XChatError
-      XCTAssertEqual(error?.kind, .decryption)
-      XCTAssertEqual(error?.message, "secretstream pull failed")
+      XCTAssertEqual(error as? PrimitiveError, .authenticationFailed)
     }
   }
 
@@ -167,37 +165,7 @@ final class SecretStreamTests: XCTestCase {
     for length in [0, 1, 16] {
       var pull = try SecretStreamPull(header: header, key: key)
       XCTAssertThrowsError(try pull.pull([UInt8](repeating: 0, count: length))) { error in
-        XCTAssertEqual((error as? XChatError)?.kind, .decryption)
-      }
-    }
-  }
-
-  /// Invalid key and header lengths are input errors naming the value.
-  func testInvalidLengths() throws {
-    for length in [0, 16, 31, 33] {
-      XCTAssertThrowsError(try SecretStreamPush.start(key: [UInt8](repeating: 0, count: length))) {
-        error in
-        let error = error as? XChatError
-        XCTAssertEqual(error?.kind, .invalidInput)
-        XCTAssertEqual(error?.message, "Conversation key must be 32 bytes")
-      }
-      XCTAssertThrowsError(
-        try SecretStreamPull(
-          header: [UInt8](repeating: 0, count: 24),
-          key: [UInt8](repeating: 0, count: length))
-      ) { error in
-        let error = error as? XChatError
-        XCTAssertEqual(error?.kind, .invalidInput)
-        XCTAssertEqual(error?.message, "Conversation key must be 32 bytes")
-      }
-    }
-    for length in [0, 23, 25] {
-      XCTAssertThrowsError(
-        try SecretStreamPull(
-          header: [UInt8](repeating: 0, count: length),
-          key: [UInt8](repeating: 0, count: 32))
-      ) { error in
-        XCTAssertEqual((error as? XChatError)?.message, "secretstream headers are 24 bytes")
+        XCTAssertEqual(error as? PrimitiveError, .ciphertextTooShort)
       }
     }
   }

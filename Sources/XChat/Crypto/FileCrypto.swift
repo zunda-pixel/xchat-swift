@@ -61,10 +61,12 @@ public struct FileEncryptor: ~Copyable {
   /// Set after emitting the last frame.
   private var finished: Bool
 
-  /// Creates an encryptor for one file under a 32-byte conversation key.
+  /// Creates an encryptor for one file under a 32-byte key: a key the
+  /// caller holds, as `encryptFileWithKey` takes, or the key `fileEncryptor`
+  /// derives for a message's file.
   public init(key: [UInt8]) throws {
     guard key.count == 32 else {
-      throw XChatError.invalidInput("Conversation key must be 32 bytes")
+      throw XChatError.invalidInput(.fileKeyLength(key.count))
     }
     let (header, pusher) = try SecretStreamPush.start(key: key)
     stream = pusher
@@ -79,7 +81,7 @@ public struct FileEncryptor: ~Copyable {
   /// frame, so the returned bytes may be empty for small inputs.
   public mutating func push(_ plaintext: [UInt8]) throws -> [UInt8] {
     guard !finished else {
-      throw XChatError.invalidInput("File encryptor already finished")
+      throw XChatError.invalidInput(.fileEncryptorFinished)
     }
     var out = prefix
     prefix = []
@@ -99,7 +101,7 @@ public struct FileEncryptor: ~Copyable {
   /// Emits the final frame and marks the encryptor as finished.
   public mutating func finish() throws -> [UInt8] {
     guard !finished else {
-      throw XChatError.invalidInput("File encryptor already finished")
+      throw XChatError.invalidInput(.fileEncryptorFinished)
     }
     finished = true
     var out = prefix
@@ -110,20 +112,6 @@ public struct FileEncryptor: ~Copyable {
     }
     return out
   }
-}
-
-/// Ways a stream fails to decrypt.
-private enum StreamFault {
-  /// A frame followed by more data failed to authenticate.
-  case badFrame
-  /// The last frame failed to authenticate, so it may also be cut short.
-  case badLastFrame
-  /// Data follows the final frame.
-  case trailingData
-  /// The input ended inside the header.
-  case truncatedHeader
-  /// The input ended before the final frame.
-  case truncated
 }
 
 /// Incremental decryptor for one encrypted file.
@@ -154,19 +142,23 @@ public struct FileDecryptor {
   /// Set by `finish`, which consumes the decryptor in the reference API.
   private var finished: Bool
 
-  /// Creates a decryptor for one file under a 32-byte conversation key.
+  /// Creates a decryptor for one file under a 32-byte key the caller
+  /// holds, as `decryptFileWithKey` takes. Its errors for the file's bytes
+  /// (`DecryptionFailure.file`) carry no media hash key; to have them name
+  /// the media, create it with `init(key:mediaHashKey:)`.
   public init(key: [UInt8]) throws {
     guard key.count == 32 else {
-      throw XChatError.invalidInput("Conversation key must be 32 bytes")
+      throw XChatError.invalidInput(.fileKeyLength(key.count))
     }
     self.init(validatedKey: key, mediaHashKey: nil)
   }
 
-  /// Creates a decryptor for the media file named by `mediaHashKey`,
-  /// whose errors name that media and say what to pass instead.
+  /// Creates a decryptor for the media file named by `mediaHashKey`, under
+  /// its 32-byte key. Its errors for the file's bytes
+  /// (`DecryptionFailure.file`) carry that media hash key.
   public init(key: [UInt8], mediaHashKey: String) throws {
     guard key.count == 32 else {
-      throw XChatError.invalidInput("Conversation key must be 32 bytes")
+      throw XChatError.invalidInput(.fileKeyLength(key.count))
     }
     self.init(validatedKey: key, mediaHashKey: mediaHashKey)
   }
@@ -182,38 +174,8 @@ public struct FileDecryptor {
     finished = false
   }
 
-  private func fault(_ fault: StreamFault) -> XChatError {
-    guard let hashKey = mediaHashKey else {
-      switch fault {
-      case .badFrame, .badLastFrame:
-        return XChatError.decryption("secretstream pull failed")
-      case .trailingData:
-        return XChatError.decryption("data after final stream frame")
-      case .truncatedHeader:
-        return XChatError.decryption("stream ended before header was complete")
-      case .truncated:
-        return XChatError.decryption("stream truncated: ended before final frame")
-      }
-    }
-    switch fault {
-    case .badFrame:
-      return XChatError.decryption(
-        "the bytes are not the encrypted file of media_hash_key '\(hashKey)', or they "
-          + "are corrupted: pass the bytes downloaded for that media hash key")
-    case .badLastFrame:
-      return XChatError.decryption(
-        "the bytes are not the complete encrypted file of media_hash_key '\(hashKey)': "
-          + "they are truncated, corrupted, or another file; pass the complete bytes "
-          + "downloaded for that media hash key")
-    case .trailingData:
-      return XChatError.decryption(
-        "the bytes continue past the end of the encrypted file of media_hash_key "
-          + "'\(hashKey)': pass only the bytes downloaded for that media hash key")
-    case .truncatedHeader, .truncated:
-      return XChatError.decryption(
-        "the bytes of media_hash_key '\(hashKey)' are truncated: pass the complete bytes "
-          + "downloaded for that media hash key")
-    }
+  private func fault(_ fault: XChatError.FileFailure) -> XChatError {
+    XChatError.decryption(.file(fault, mediaHashKey: mediaHashKey))
   }
 
   /// Pulls `frame` through the stored stream, in place. The stream must
@@ -234,10 +196,10 @@ public struct FileDecryptor {
   /// bytes may be empty until enough input has arrived.
   public mutating func push(_ ciphertext: [UInt8]) throws -> [UInt8] {
     guard !finished else {
-      throw XChatError.invalidInput("File decryptor already finished")
+      throw XChatError.invalidInput(.fileDecryptorFinished)
     }
     if sawFinal {
-      throw fault(.trailingData)
+      throw fault(.dataAfterFinalFrame)
     }
     var input = ciphertext[...]
 
@@ -265,13 +227,15 @@ public struct FileDecryptor {
       let (framePlaintext, tag): ([UInt8], SecretStreamTag)
       do {
         (framePlaintext, tag) = try pullFrame(frame)
+      } catch PrimitiveError.unknownStreamTag(let tag) {
+        throw fault(.unknownTag(tag))
       } catch {
-        throw fault(.badFrame)
+        throw fault(.authenticationFailed)
       }
       sawChunk = true
       out += framePlaintext
       if tag == .final {
-        throw fault(.trailingData)
+        throw fault(.dataAfterFinalFrame)
       }
     }
     buf.removeFirst(offset)
@@ -283,11 +247,11 @@ public struct FileDecryptor {
   /// of only the 24-byte header decrypts to empty output.
   public mutating func finish() throws -> [UInt8] {
     guard !finished else {
-      throw XChatError.invalidInput("File decryptor already finished")
+      throw XChatError.invalidInput(.fileDecryptorFinished)
     }
     finished = true
     guard pull != nil else {
-      throw fault(.truncatedHeader)
+      throw fault(.truncated)
     }
 
     var out: [UInt8] = []
@@ -297,8 +261,10 @@ public struct FileDecryptor {
       let (framePlaintext, tag): ([UInt8], SecretStreamTag)
       do {
         (framePlaintext, tag) = try pullFrame(frame)
+      } catch PrimitiveError.unknownStreamTag(let tag) {
+        throw fault(.unknownTag(tag))
       } catch {
-        throw fault(.badLastFrame)
+        throw fault(.lastFrameAuthenticationFailed)
       }
       sawChunk = true
       out += framePlaintext
@@ -344,7 +310,8 @@ func decryptFile(key: [UInt8], ciphertext: [UInt8]) throws -> [UInt8] {
 }
 
 /// Decrypts the whole encrypted media file named by `mediaHashKey`; its
-/// errors name that media and say what to pass instead.
+/// errors for the file's bytes (`DecryptionFailure.file`) carry that media
+/// hash key.
 func decryptMedia(key: [UInt8], mediaHashKey: String, encrypted: [UInt8]) throws -> [UInt8] {
   var decryptor = try FileDecryptor(key: key, mediaHashKey: mediaHashKey)
   var out: [UInt8] = []
