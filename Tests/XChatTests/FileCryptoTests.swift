@@ -1,11 +1,39 @@
-import XCTest
+import Testing
 
 @testable import XChat
+
+/// A plaintext length and the framed file size `encryptFile` produces.
+struct FileFrameCase: Sendable {
+  var plaintextLength: Int
+  var expectedSize: Int
+}
+
+private let fileFrameCases: [FileFrameCase] = [
+  FileFrameCase(plaintextLength: 0, expectedSize: 24),
+  FileFrameCase(plaintextLength: 1, expectedSize: 24 + 17 + 1),
+  FileFrameCase(plaintextLength: 1024, expectedSize: 24 + 1041),
+  FileFrameCase(plaintextLength: 1025, expectedSize: 24 + 1041 + 18),
+  FileFrameCase(plaintextLength: 2048, expectedSize: 24 + 1041 + 1041),
+  FileFrameCase(plaintextLength: 2049, expectedSize: 24 + 1041 + 1041 + 18),
+]
+
+/// A byte offset and the fault tampering it produces.
+struct FileTamperCase: Sendable {
+  var index: Int
+  var fault: XChatError.FileFailure
+}
+
+private let fileTamperCases: [FileTamperCase] = [
+  FileTamperCase(index: 24, fault: .authenticationFailed),
+  FileTamperCase(index: 100, fault: .authenticationFailed),
+  FileTamperCase(index: 1064, fault: .authenticationFailed),
+  FileTamperCase(index: 24 + 1041 + 10, fault: .lastFrameAuthenticationFailed),
+]
 
 /// The file wire format — `header (24B) || chunks` — through
 /// `FileEncryptor`/`FileDecryptor`, including the core's cross-binding
 /// media vector, framing rules, and every truncation and tampering fault.
-final class FileCryptoTests: XCTestCase {
+struct FileCryptoTests {
   /// The conversation key is itself the secretstream key, so the media
   /// vector decrypts with it directly.
   private static let key = TestVectors.bytes("conversation_key_b64")
@@ -15,40 +43,34 @@ final class FileCryptoTests: XCTestCase {
   /// Asserts the closure throws `expected`.
   private func assertThrows<T>(
     _ expected: XChatError,
-    _ message: @autoclosure () -> String = "",
-    file: StaticString = #filePath,
-    line: UInt = #line,
+    _ comment: Comment? = nil,
     _ body: () throws -> T
   ) {
-    XCTAssertThrowsError(try body(), message(), file: file, line: line) { error in
-      XCTAssertEqual(error as? XChatError, expected, message(), file: file, line: line)
-    }
+    #expect(throws: expected, comment) { try body() }
   }
 
   /// Asserts the closure throws `fault` for a file under a key the caller
   /// holds.
   private func assertThrows<T>(
     _ fault: XChatError.FileFailure,
-    _ message: @autoclosure () -> String = "",
-    file: StaticString = #filePath,
-    line: UInt = #line,
+    _ comment: Comment? = nil,
     _ body: () throws -> T
   ) {
     assertThrows(
-      .decryption(.file(fault, mediaHashKey: nil)), message(), file: file, line: line, body)
+      .decryption(.file(fault, mediaHashKey: nil)), comment, body)
   }
 
   // MARK: Cross-binding vector
 
   /// The core's media ciphertext decrypts through the file layer whether
   /// fed whole, one byte at a time, or in 700-byte pieces.
-  func testVectorDecryptsThroughFileDecryptor() throws {
-    XCTAssertEqual(Self.vectorCiphertext.count, 1558)
-    XCTAssertEqual(Self.vectorPlaintext.count, 1500)
+  @Test func vectorDecryptsThroughFileDecryptor() throws {
+    #expect(Self.vectorCiphertext.count == 1558)
+    #expect(Self.vectorPlaintext.count == 1500)
 
-    XCTAssertEqual(
-      try decryptFile(key: Self.key, ciphertext: Self.vectorCiphertext),
-      Self.vectorPlaintext)
+    #expect(
+      try decryptFile(key: Self.key, ciphertext: Self.vectorCiphertext)
+        == Self.vectorPlaintext)
 
     var byteWise = try FileDecryptor(key: Self.key)
     var byteWisePlaintext: [UInt8] = []
@@ -56,7 +78,7 @@ final class FileCryptoTests: XCTestCase {
       byteWisePlaintext += try byteWise.push([byte])
     }
     byteWisePlaintext += try byteWise.finish()
-    XCTAssertEqual(byteWisePlaintext, Self.vectorPlaintext)
+    #expect(byteWisePlaintext == Self.vectorPlaintext)
 
     var chunked = try FileDecryptor(key: Self.key)
     var chunkedPlaintext: [UInt8] = []
@@ -67,90 +89,83 @@ final class FileCryptoTests: XCTestCase {
       offset = end
     }
     chunkedPlaintext += try chunked.finish()
-    XCTAssertEqual(chunkedPlaintext, Self.vectorPlaintext)
+    #expect(chunkedPlaintext == Self.vectorPlaintext)
   }
 
   /// `decryptMedia` decrypts the vector the same way `decryptFile` does;
   /// only its failures differ, by carrying the media hash key.
-  func testDecryptMediaVector() throws {
-    XCTAssertEqual(
+  @Test func decryptMediaVector() throws {
+    #expect(
       try decryptMedia(
         key: Self.key,
         mediaHashKey: TestVectors.string("media_conversation_key_hash_key"),
-        encrypted: Self.vectorCiphertext),
-      Self.vectorPlaintext)
+        encrypted: Self.vectorCiphertext)
+        == Self.vectorPlaintext)
   }
 
   // MARK: Round trips and sizes
 
   /// Round trip at every frame boundary, with `encryptedFileSize` matching
   /// the bytes produced.
-  func testRoundTripAndSizes() throws {
+  @Test(arguments: [0, 1, 1023, 1024, 1025, 2048, 2049, 3000])
+  func roundTripAndSizes(length: Int) throws {
     let full = (0..<4096).map { UInt8($0 % 251) }
-    for length in [0, 1, 1023, 1024, 1025, 2048, 2049, 3000] {
-      let plaintext = Array(full[0..<length])
-      let encrypted = try encryptFile(key: Self.key, plaintext: plaintext)
-      let expected = try XCTUnwrap(encryptedFileSize(UInt64(length)))
-      XCTAssertEqual(UInt64(encrypted.count), expected, "length \(length)")
-      XCTAssertEqual(
-        try decryptFile(key: Self.key, ciphertext: encrypted), plaintext,
-        "length \(length)")
-    }
+    let plaintext = Array(full[0..<length])
+    let encrypted = try encryptFile(key: Self.key, plaintext: plaintext)
+    let expected = try #require(encryptedFileSize(UInt64(length)))
+    #expect(UInt64(encrypted.count) == expected, "length \(length)")
+    #expect(
+      try decryptFile(key: Self.key, ciphertext: encrypted) == plaintext,
+      "length \(length)")
   }
 
   /// The exact chunk framing the wire format freezes: intermediate chunks
   /// are 1041 bytes, the last frame is 17 bytes plus the remaining tail.
-  func testFrameSizes() throws {
-    let cases: [(Int, Int)] = [
-      (0, 24),
-      (1, 24 + 17 + 1),
-      (1024, 24 + 1041),
-      (1025, 24 + 1041 + 18),
-      (2048, 24 + 1041 + 1041),
-      (2049, 24 + 1041 + 1041 + 18),
-    ]
-    for (plaintextLength, expectedSize) in cases {
-      let encrypted = try encryptFile(
-        key: Self.key, plaintext: [UInt8](repeating: 5, count: plaintextLength))
-      XCTAssertEqual(encrypted.count, expectedSize, "plaintext \(plaintextLength)")
-    }
+  @Test(arguments: fileFrameCases)
+  func frameSizes(testCase: FileFrameCase) throws {
+    let encrypted = try encryptFile(
+      key: Self.key,
+      plaintext: [UInt8](repeating: 5, count: testCase.plaintextLength))
+    #expect(
+      encrypted.count == testCase.expectedSize,
+      "plaintext \(testCase.plaintextLength)")
   }
 
   /// `encryptedFileSize` agrees with the framed output at every boundary.
-  func testEncryptedFileSize() {
-    XCTAssertEqual(encryptedFileSize(0), 24)
-    XCTAssertEqual(encryptedFileSize(1), 1 + 24 + 17)
-    XCTAssertEqual(encryptedFileSize(1023), 1023 + 24 + 17)
-    XCTAssertEqual(encryptedFileSize(1024), 1024 + 24 + 17)
-    XCTAssertEqual(encryptedFileSize(1025), 1025 + 24 + 2 * 17)
-    XCTAssertEqual(encryptedFileSize(2048), 2048 + 24 + 2 * 17)
-    XCTAssertEqual(encryptedFileSize(2049), 2049 + 24 + 3 * 17)
+  @Test func encryptedFileSizeMatchesFrames() {
+    #expect(encryptedFileSize(0) == 24)
+    #expect(encryptedFileSize(1) == 1 + 24 + 17)
+    #expect(encryptedFileSize(1023) == 1023 + 24 + 17)
+    #expect(encryptedFileSize(1024) == 1024 + 24 + 17)
+    #expect(encryptedFileSize(1025) == 1025 + 24 + 2 * 17)
+    #expect(encryptedFileSize(2048) == 2048 + 24 + 2 * 17)
+    #expect(encryptedFileSize(2049) == 2049 + 24 + 3 * 17)
     // The sum cannot be represented as a UInt64.
-    XCTAssertNil(encryptedFileSize(UInt64.max))
+    #expect(encryptedFileSize(UInt64.max) == nil)
   }
 
   /// Empty input produces only the 24-byte header, which decrypts back to
   /// nothing.
-  func testEmptyFileIsHeaderOnly() throws {
+  @Test func emptyFileIsHeaderOnly() throws {
     let encrypted = try encryptFile(key: Self.key, plaintext: [])
-    XCTAssertEqual(encrypted.count, 24)
-    XCTAssertEqual(try decryptFile(key: Self.key, ciphertext: encrypted), [])
+    #expect(encrypted.count == 24)
+    #expect(try decryptFile(key: Self.key, ciphertext: encrypted) == [])
   }
 
   /// A chunk equal to the plaintext chunk size is held back for `finish`,
   /// so `push` emits only the header.
-  func testPushHoldsBackLastChunk() throws {
+  @Test func pushHoldsBackLastChunk() throws {
     var encryptor = try FileEncryptor(key: Self.key)
     var out = try encryptor.push([UInt8](repeating: 7, count: 1024))
-    XCTAssertEqual(out.count, 24)
+    #expect(out.count == 24)
     out += try encryptor.finish()
-    XCTAssertEqual(out.count, 24 + 1041)
+    #expect(out.count == 24 + 1041)
   }
 
   /// Framing depends only on the plaintext, so splitting the input across
   /// arbitrary `push` calls yields the same ciphertext size and opens to
   /// the same plaintext.
-  func testOutputSizeIndependentOfSplitPoints() throws {
+  @Test func outputSizeIndependentOfSplitPoints() throws {
     let plaintext = (0..<3000).map { UInt8($0 % 251) }
     let oneShot = try encryptFile(key: Self.key, plaintext: plaintext)
 
@@ -161,15 +176,15 @@ final class FileCryptoTests: XCTestCase {
     }
     byteWise += try encryptor.finish()
 
-    XCTAssertEqual(oneShot.count, byteWise.count)
-    XCTAssertEqual(oneShot.count, 24 + 1041 + 1041 + 969)
-    XCTAssertEqual(try decryptFile(key: Self.key, ciphertext: byteWise), plaintext)
+    #expect(oneShot.count == byteWise.count)
+    #expect(oneShot.count == 24 + 1041 + 1041 + 969)
+    #expect(try decryptFile(key: Self.key, ciphertext: byteWise) == plaintext)
   }
 
   // MARK: Faults
 
   /// Dropping the final frame is detected as truncation.
-  func testMissingFinalFrameRejected() throws {
+  @Test func missingFinalFrameRejected() throws {
     let truncated = Array(Self.vectorCiphertext[0..<(Self.vectorCiphertext.count - 493)])
     assertThrows(.truncated) {
       try decryptFile(key: Self.key, ciphertext: truncated)
@@ -179,7 +194,7 @@ final class FileCryptoTests: XCTestCase {
   /// Cutting inside the final frame fails its MAC, which cannot be told
   /// from tampering, so it is reported as the last frame failing rather
   /// than as a clean truncation.
-  func testCutInsideFinalFrameRejected() throws {
+  @Test func cutInsideFinalFrameRejected() throws {
     let truncated = Array(Self.vectorCiphertext[0..<(Self.vectorCiphertext.count - 10)])
     assertThrows(.lastFrameAuthenticationFailed) {
       try decryptFile(key: Self.key, ciphertext: truncated)
@@ -188,20 +203,19 @@ final class FileCryptoTests: XCTestCase {
 
   /// An input that ends inside the 24-byte header is rejected as
   /// truncated.
-  func testHeaderIncompleteRejected() throws {
-    for length in [0, 1, 23] {
-      var decryptor = try FileDecryptor(key: Self.key)
-      _ = try decryptor.push([UInt8](repeating: 0, count: length))
-      assertThrows(.truncated, "length \(length)") { try decryptor.finish() }
-    }
+  @Test(arguments: [0, 1, 23])
+  func headerIncompleteRejected(length: Int) throws {
+    var decryptor = try FileDecryptor(key: Self.key)
+    _ = try decryptor.push([UInt8](repeating: 0, count: length))
+    assertThrows(.truncated, "length \(length)") { try decryptor.finish() }
   }
 
   /// A full final frame followed by more data is rejected, since a file
   /// whose final frame is not last is malformed.
-  func testDataAfterFinalFrameRejected() throws {
+  @Test func dataAfterFinalFrameRejected() throws {
     let encrypted = try encryptFile(
       key: Self.key, plaintext: [UInt8](repeating: 9, count: 1024))
-    XCTAssertEqual(encrypted.count, 24 + 1041)
+    #expect(encrypted.count == 24 + 1041)
 
     var decryptor = try FileDecryptor(key: Self.key)
     assertThrows(.dataAfterFinalFrame) {
@@ -212,24 +226,17 @@ final class FileCryptoTests: XCTestCase {
   /// A tampered frame byte fails authentication and yields no plaintext.
   /// The last frame's failure is its own case, since it may also be cut
   /// short.
-  func testTamperedFrameRejected() throws {
-    let faults: [(index: Int, fault: XChatError.FileFailure)] = [
-      (24, .authenticationFailed),
-      (100, .authenticationFailed),
-      (1064, .authenticationFailed),
-      (24 + 1041 + 10, .lastFrameAuthenticationFailed),
-    ]
-    for (index, fault) in faults {
-      var tampered = Self.vectorCiphertext
-      tampered[index] ^= 0x80
-      assertThrows(fault, "byte \(index)") {
-        try decryptFile(key: Self.key, ciphertext: tampered)
-      }
+  @Test(arguments: fileTamperCases)
+  func tamperedFrameRejected(testCase: FileTamperCase) throws {
+    var tampered = Self.vectorCiphertext
+    tampered[testCase.index] ^= 0x80
+    assertThrows(testCase.fault, "byte \(testCase.index)") {
+      try decryptFile(key: Self.key, ciphertext: tampered)
     }
   }
 
   /// A tampered header fails the first frame's MAC.
-  func testTamperedHeaderRejected() throws {
+  @Test func tamperedHeaderRejected() throws {
     var tampered = Self.vectorCiphertext
     tampered[0] ^= 1
     assertThrows(.authenticationFailed) {
@@ -243,7 +250,7 @@ final class FileCryptoTests: XCTestCase {
 
   /// A frame that fails with data behind it fails authentication, for that
   /// media.
-  func testMediaBadFrameNamesTheMedia() throws {
+  @Test func mediaBadFrameNamesTheMedia() throws {
     var tampered = Self.vectorCiphertext
     tampered[24 + 10] ^= 0x80
     assertThrows(.decryption(.file(.authenticationFailed, mediaHashKey: Self.mediaHashKey))) {
@@ -253,7 +260,7 @@ final class FileCryptoTests: XCTestCase {
 
   /// A last frame that fails its MAC is its own fault, for that media,
   /// since the bytes may also be cut short inside it.
-  func testMediaBadLastFrameNamesTheMedia() throws {
+  @Test func mediaBadLastFrameNamesTheMedia() throws {
     var tampered = Self.vectorCiphertext
     tampered[24 + 1041 + 10] ^= 0x80
     assertThrows(
@@ -264,7 +271,7 @@ final class FileCryptoTests: XCTestCase {
   }
 
   /// Data after the final frame is reported for that media.
-  func testMediaTrailingDataNamesTheMedia() throws {
+  @Test func mediaTrailingDataNamesTheMedia() throws {
     let encrypted = try encryptFile(
       key: Self.key, plaintext: [UInt8](repeating: 9, count: 1024))
     assertThrows(.decryption(.file(.dataAfterFinalFrame, mediaHashKey: Self.mediaHashKey))) {
@@ -276,7 +283,7 @@ final class FileCryptoTests: XCTestCase {
   }
 
   /// A missing final frame reports that media's bytes as truncated.
-  func testMediaTruncationNamesTheMedia() throws {
+  @Test func mediaTruncationNamesTheMedia() throws {
     let truncated = Array(Self.vectorCiphertext[0..<(Self.vectorCiphertext.count - 493)])
     assertThrows(.decryption(.file(.truncated, mediaHashKey: Self.mediaHashKey))) {
       try decryptMedia(key: Self.key, mediaHashKey: Self.mediaHashKey, encrypted: truncated)
@@ -288,26 +295,25 @@ final class FileCryptoTests: XCTestCase {
   /// Keys must be 32 bytes at every entry point, and a key of another
   /// length is reported as the file's key, as `encryptFileWithKey` and
   /// `decryptFileWithKey` report it.
-  func testKeyLengthValidation() {
-    for length in [0, 16, 31, 33] {
-      let key = [UInt8](repeating: 0, count: length)
-      assertThrows(.invalidInput(.fileKeyLength(length))) {
-        _ = try FileEncryptor(key: key)
-      }
-      assertThrows(.invalidInput(.fileKeyLength(length))) {
-        try FileDecryptor(key: key)
-      }
-      assertThrows(.invalidInput(.fileKeyLength(length))) {
-        try encryptFile(key: key, plaintext: [1])
-      }
-      assertThrows(.invalidInput(.fileKeyLength(length))) {
-        try decryptFile(key: key, ciphertext: [1])
-      }
+  @Test(arguments: [0, 16, 31, 33])
+  func keyLengthValidation(length: Int) {
+    let key = [UInt8](repeating: 0, count: length)
+    assertThrows(.invalidInput(.fileKeyLength(length))) {
+      _ = try FileEncryptor(key: key)
+    }
+    assertThrows(.invalidInput(.fileKeyLength(length))) {
+      try FileDecryptor(key: key)
+    }
+    assertThrows(.invalidInput(.fileKeyLength(length))) {
+      try encryptFile(key: key, plaintext: [1])
+    }
+    assertThrows(.invalidInput(.fileKeyLength(length))) {
+      try decryptFile(key: key, ciphertext: [1])
     }
   }
 
   /// `finish` consumes the encryptor; later calls say so.
-  func testFinishedEncryptorRejectsReuse() throws {
+  @Test func finishedEncryptorRejectsReuse() throws {
     var encryptor = try FileEncryptor(key: Self.key)
     _ = try encryptor.finish()
     assertThrows(.invalidInput(.fileEncryptorFinished)) {
@@ -320,9 +326,9 @@ final class FileCryptoTests: XCTestCase {
 
   /// `finish` consumes the decryptor, even when it fails, matching the
   /// reference's move semantics.
-  func testFinishedDecryptorRejectsReuse() throws {
+  @Test func finishedDecryptorRejectsReuse() throws {
     var failed = try FileDecryptor(key: Self.key)
-    XCTAssertThrowsError(try failed.finish())
+    #expect(throws: (any Error).self) { try failed.finish() }
     assertThrows(.invalidInput(.fileDecryptorFinished)) {
       try failed.finish()
     }

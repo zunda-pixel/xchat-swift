@@ -1,130 +1,130 @@
-import XCTest
+import Testing
 
 @testable import XChat
 
 /// Per-message, per-attachment and media-message-id derivation against the
 /// reference implementation's known answers.
-final class MessageKeysTests: XCTestCase {
+struct MessageKeysTests {
   private static func hex(_ string: String) -> [UInt8] {
     try! Hex.decode(string)
   }
 
   /// The reference's `message_and_attachment_keys_match_known_answers`.
-  func testMessageAndAttachmentKeysMatchKnownAnswers() throws {
+  @Test func messageAndAttachmentKeysMatchKnownAnswers() throws {
     let conversationKey = Self.hex(
       "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
     let messageId = "9d8c7b6a-5f4e-4d3c-8b2a-190807060504"
 
-    let messageKey = try XCTUnwrap(
+    let messageKey = try #require(
       deriveMessageKey(
         conversationKey: conversationKey,
         senderId: "1876543210987654321",
         messageId: messageId))
-    XCTAssertEqual(
-      Hex.encode(messageKey),
-      "4d443b9a862e9584ccd0aee2753162aa7c5c1dbcb5f967610155f65ae41d8084")
+    #expect(
+      Hex.encode(messageKey)
+        == "4d443b9a862e9584ccd0aee2753162aa7c5c1dbcb5f967610155f65ae41d8084")
 
     let firstAttachment = deriveAttachmentKey(
       messageKey: messageKey, attachmentId: messageId)
-    XCTAssertEqual(
-      Hex.encode(firstAttachment),
-      "1ef86545f91f8a3078e276949f7555df2ca584e9c6509b261a558a2e618a1b4b")
+    #expect(
+      Hex.encode(firstAttachment)
+        == "1ef86545f91f8a3078e276949f7555df2ca584e9c6509b261a558a2e618a1b4b")
 
     let secondAttachment = deriveAttachmentKey(
       messageKey: messageKey, attachmentId: "\(messageId)#1")
-    XCTAssertEqual(
-      Hex.encode(secondAttachment),
-      "8a7bc01f2ff35c661140da68606b2370cecc13810f245d791aeb8ba6b40d4ea8")
+    #expect(
+      Hex.encode(secondAttachment)
+        == "8a7bc01f2ff35c661140da68606b2370cecc13810f245d791aeb8ba6b40d4ea8")
   }
 
   /// The reference's `short_sender_id_is_its_digits`.
-  func testShortSenderIdIsItsDigits() throws {
+  @Test func shortSenderIdIsItsDigits() throws {
     let conversationKey = Self.hex(
       "c3a1f0e2d4b6987a5c3e1f0d2b4a6987c3a1f0e2d4b6987a5c3e1f0d2b4a6987")
     let messageId = "00000000-0000-4000-8000-000000000001"
 
-    let messageKey = try XCTUnwrap(
+    let messageKey = try #require(
       deriveMessageKey(
         conversationKey: conversationKey, senderId: "12", messageId: messageId))
-    XCTAssertEqual(
-      Hex.encode(messageKey),
-      "685bd4a20c7efb64c99147ab5854560c72eac9a826b04880b64e1951d4ef4cc7")
+    #expect(
+      Hex.encode(messageKey)
+        == "685bd4a20c7efb64c99147ab5854560c72eac9a826b04880b64e1951d4ef4cc7")
 
     let attachmentKey = deriveAttachmentKey(
       messageKey: messageKey, attachmentId: messageId)
-    XCTAssertEqual(
-      Hex.encode(attachmentKey),
-      "4f7d8ca1ef7cb1319743204496358333126086d0a23bdae26bbe5186ba8de093")
+    #expect(
+      Hex.encode(attachmentKey)
+        == "4f7d8ca1ef7cb1319743204496358333126086d0a23bdae26bbe5186ba8de093")
   }
 
   /// The reference's `attachment_key_for_message_id_matches_known_answer`.
-  func testAttachmentKeyForMessageIdMatchesKnownAnswer() throws {
+  @Test func attachmentKeyForMessageIdMatchesKnownAnswer() throws {
     let conversationKey = [UInt8](repeating: 7, count: 32)
-    let messageKey = try XCTUnwrap(
+    let messageKey = try #require(
       deriveMessageKey(
         conversationKey: conversationKey,
         senderId: "42",
         messageId: "1975816253410000000"))
     let attachmentKey = deriveAttachmentKey(
       messageKey: messageKey, attachmentId: "1975816253410000000")
-    XCTAssertEqual(
-      Hex.encode(attachmentKey),
-      "d3f7222df89d36796148c1e5a7520b7e71baacde799acf247eeea2c80d0933bf")
+    #expect(
+      Hex.encode(attachmentKey)
+        == "d3f7222df89d36796148c1e5a7520b7e71baacde799acf247eeea2c80d0933bf")
   }
 
   /// A signed or zero-padded sender id derives the same key as its
   /// canonical decimal form.
-  func testSenderIdIsCanonicalized() throws {
+  @Test func senderIdIsCanonicalized() {
     let conversationKey = [UInt8](repeating: 1, count: 32)
     let canonical = deriveMessageKey(
       conversationKey: conversationKey, senderId: "12", messageId: "m")
     let padded = deriveMessageKey(
       conversationKey: conversationKey, senderId: "+012", messageId: "m")
-    XCTAssertEqual(canonical, padded)
+    #expect(canonical == padded)
   }
 
-  func testNonNumericSenderHasNoMessageKey() {
-    XCTAssertNil(
+  @Test func nonNumericSenderHasNoMessageKey() {
+    #expect(
       deriveMessageKey(
         conversationKey: [UInt8](repeating: 1, count: 32),
         senderId: "sender-1",
-        messageId: "m"))
+        messageId: "m") == nil)
   }
 
-  func testVersionOneOrMoreUsesAMessageKey() {
-    XCTAssertFalse(usesMessageKey(nil))
-    XCTAssertFalse(usesMessageKey(0))
-    XCTAssertFalse(usesMessageKey(-1))
-    XCTAssertTrue(usesMessageKey(1))
-    XCTAssertTrue(usesMessageKey(2))
+  @Test func versionOneOrMoreUsesAMessageKey() {
+    #expect(!usesMessageKey(nil))
+    #expect(!usesMessageKey(0))
+    #expect(!usesMessageKey(-1))
+    #expect(usesMessageKey(1))
+    #expect(usesMessageKey(2))
   }
 
-  func testAttachmentIdsFallBackToTheMessageIdByPosition() {
-    XCTAssertEqual(resolveAttachmentId(storedId: nil, messageId: "m", index: 0), "m")
-    XCTAssertEqual(resolveAttachmentId(storedId: nil, messageId: "m", index: 1), "m#1")
-    XCTAssertEqual(resolveAttachmentId(storedId: nil, messageId: "m", index: 2), "m#2")
-    XCTAssertEqual(resolveAttachmentId(storedId: "att-9", messageId: "m", index: 0), "att-9")
-    XCTAssertEqual(resolveAttachmentId(storedId: "att-9", messageId: "m", index: 3), "att-9")
+  @Test func attachmentIdsFallBackToTheMessageIdByPosition() {
+    #expect(resolveAttachmentId(storedId: nil, messageId: "m", index: 0) == "m")
+    #expect(resolveAttachmentId(storedId: nil, messageId: "m", index: 1) == "m#1")
+    #expect(resolveAttachmentId(storedId: nil, messageId: "m", index: 2) == "m#2")
+    #expect(resolveAttachmentId(storedId: "att-9", messageId: "m", index: 0) == "att-9")
+    #expect(resolveAttachmentId(storedId: "att-9", messageId: "m", index: 3) == "att-9")
     // A set empty id counts and wins.
-    XCTAssertEqual(resolveAttachmentId(storedId: "", messageId: "m", index: 1), "")
+    #expect(resolveAttachmentId(storedId: "", messageId: "m", index: 1) == "")
   }
 
   /// The reference's `media_message_id_matches_known_answer`.
-  func testMediaMessageIdMatchesKnownAnswer() {
+  @Test func mediaMessageIdMatchesKnownAnswer() {
     let conversationKey = Self.hex(
       "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-    XCTAssertEqual(
+    #expect(
       deriveMediaMessageId(
         conversationKey: conversationKey,
         conversationKeyVersion: "7",
         senderId: "1001",
         conversationId: "1001:1002",
-        mediaHashKeys: ["hash-a", "hash-b"]),
-      "906c3ace-dc0c-486c-b242-e0ae974b3c10")
+        mediaHashKeys: ["hash-a", "hash-b"])
+        == "906c3ace-dc0c-486c-b242-e0ae974b3c10")
   }
 
   /// The id is a lowercase v4 UUID and changes with every input.
-  func testMediaMessageIdIsAVersion4Uuid() throws {
+  @Test func mediaMessageIdIsAVersion4Uuid() {
     let conversationKey = [UInt8](repeating: 3, count: 32)
     let id = deriveMediaMessageId(
       conversationKey: conversationKey,
@@ -132,13 +132,13 @@ final class MessageKeysTests: XCTestCase {
       senderId: "1001",
       conversationId: "1001:1002",
       mediaHashKeys: ["hash-a"])
-    XCTAssertEqual(id.count, 36)
-    XCTAssertEqual(Array(id)[8], Character("-"))
-    XCTAssertEqual(Array(id)[13], Character("-"))
-    XCTAssertEqual(Array(id)[14], Character("4"))
-    XCTAssertEqual(Array(id)[18], Character("-"))
-    XCTAssertEqual(Array(id)[23], Character("-"))
-    XCTAssertEqual(id, id.lowercased())
+    #expect(id.count == 36)
+    #expect(Array(id)[8] == Character("-"))
+    #expect(Array(id)[13] == Character("-"))
+    #expect(Array(id)[14] == Character("4"))
+    #expect(Array(id)[18] == Character("-"))
+    #expect(Array(id)[23] == Character("-"))
+    #expect(id == id.lowercased())
 
     let base = deriveMediaMessageId(
       conversationKey: conversationKey,
@@ -173,7 +173,7 @@ final class MessageKeysTests: XCTestCase {
         conversationId: "1001:1002", mediaHashKeys: ["ab"]),
     ]
     for (index, variant) in variants.enumerated() {
-      XCTAssertNotEqual(base, variant, "variant \(index)")
+      #expect(base != variant, "variant \(index)")
     }
   }
 }

@@ -1,11 +1,11 @@
-import XCTest
+import Testing
 
 @testable import XChat
 
 /// The send path: message, reply, reaction and edit payloads, and prepared
 /// conversation-key changes, checked by decrypting them back with the same
 /// rules recipients apply.
-final class SendTests: XCTestCase {
+struct SendTests {
   private static let conversationKey = TestVectors.bytes("conversation_key_b64")
   private static let conversationKeyVersion = "1001"
   private static let conversationId = TestVectors.string("event_conversation_id")
@@ -46,15 +46,17 @@ final class SendTests: XCTestCase {
       payload.eventB64,
       conversationKeys: [Self.conversationKeyVersion: Self.conversationKey],
       signingKeys: [signingKey])
-    guard case .message(let message) = event else {
-      return try XCTUnwrap(nil, "expected a message event, got \(event)")
-    }
-    return message
+    let message: Message? =
+      switch event {
+      case .message(let message): message
+      default: nil
+      }
+    return try #require(message, "expected a message event, got \(event)")
   }
 
   // MARK: Messages
 
-  func testV0MessageRoundTrip() throws {
+  @Test func v0MessageRoundTrip() throws {
     let (core, signingKey) = try makeCore()
     let payload = try core.encryptMessage(
       text: "hello",
@@ -63,32 +65,32 @@ final class SendTests: XCTestCase {
       conversationKeyVersion: Self.conversationKeyVersion,
       senderId: Self.senderId)
 
-    XCTAssertEqual(payload.conversationKeyVersion, Self.conversationKeyVersion)
-    XCTAssertTrue(payload.shouldNotify)
-    XCTAssertEqual(payload.messageId.count, 36)
+    #expect(payload.conversationKeyVersion == Self.conversationKeyVersion)
+    #expect(payload.shouldNotify)
+    #expect(payload.messageId.count == 36)
 
     let message = try decrypt(payload, core: core, signingKey: signingKey)
-    XCTAssertEqual(message.text, "hello")
-    XCTAssertTrue(message.verified)
-    XCTAssertEqual(message.meta.messageId, payload.messageId)
-    XCTAssertEqual(message.meta.conversationId, Self.conversationId)
+    #expect(message.text == "hello")
+    #expect(message.verified)
+    #expect(message.meta.messageId == payload.messageId)
+    #expect(message.meta.conversationId == Self.conversationId)
 
     // The encoded MessageCreateEvent is the event's detail.
     let detailBytes = try Base64.decodeStandard(payload.encodedMessageCreateEvent)
     var reader = ThriftReader(detailBytes)
     let createEvent = try MessageCreateEvent.read(&reader)
-    XCTAssertNotNil(createEvent.contents)
-    XCTAssertNil(createEvent.contentsEncryptionVersion)
-    XCTAssertEqual(createEvent.conversationKeyVersion, Self.conversationKeyVersion)
+    #expect(createEvent.contents != nil)
+    #expect(createEvent.contentsEncryptionVersion == nil)
+    #expect(createEvent.conversationKeyVersion == Self.conversationKeyVersion)
 
     // The published event signs at version 7.
     var eventReader = ThriftReader(try Base64.decodeStandard(payload.eventB64))
     let event = try MessageEvent.read(&eventReader)
-    XCTAssertEqual(event.messageEventSignature?.signatureVersion, "7")
-    XCTAssertNil(event.messageEventSignature?.messageSigningKeyInfoList)
+    #expect(event.messageEventSignature?.signatureVersion == "7")
+    #expect(event.messageEventSignature?.messageSigningKeyInfoList == nil)
   }
 
-  func testV1MessageRoundTripWithEntities() throws {
+  @Test func v1MessageRoundTripWithEntities() throws {
     let (core, signingKey) = try makeCore(version: .v1)
     let text = "hi @alice"
     let payload = try core.encryptMessage(
@@ -103,41 +105,41 @@ final class SendTests: XCTestCase {
       shouldNotify: false)
 
     let message = try decrypt(payload, core: core, signingKey: signingKey)
-    XCTAssertEqual(message.text, text)
-    XCTAssertTrue(message.verified)
-    XCTAssertEqual(message.shouldNotify, false)
-    XCTAssertEqual(
-      message.content,
-      .text(
-        TextContent(
-          text: text,
-          entities: [RichTextEntityInfo(startIndex: 3, endIndex: 9, kind: .mention)],
-          attachments: [],
-          replyingToPreview: nil,
-          forwardedMessage: nil,
-          sentFrom: nil,
-          quickReply: nil,
-          callToActions: nil)))
+    #expect(message.text == text)
+    #expect(message.verified)
+    #expect(message.shouldNotify == false)
+    #expect(
+      message.content
+        == .text(
+          TextContent(
+            text: text,
+            entities: [RichTextEntityInfo(startIndex: 3, endIndex: 9, kind: .mention)],
+            attachments: [],
+            replyingToPreview: nil,
+            forwardedMessage: nil,
+            sentFrom: nil,
+            quickReply: nil,
+            callToActions: nil)))
 
     // v1 carries contents_encryption_version 1 and signs at v10.
     let detailBytes = try Base64.decodeStandard(payload.encodedMessageCreateEvent)
     var createReader = ThriftReader(detailBytes)
     let createEvent = try MessageCreateEvent.read(&createReader)
-    XCTAssertEqual(createEvent.contentsEncryptionVersion, 1)
+    #expect(createEvent.contentsEncryptionVersion == 1)
 
     var eventReader = ThriftReader(try Base64.decodeStandard(payload.eventB64))
     let event = try MessageEvent.read(&eventReader)
-    XCTAssertEqual(event.messageEventSignature?.signatureVersion, "10")
-    XCTAssertEqual(
-      event.messageEventSignature?.messageSigningKeyInfoList?.count, 1)
-    XCTAssertEqual(
-      event.messageEventSignature?.messageSigningKeyInfoList?.first?.memberId,
-      Self.senderId)
+    #expect(event.messageEventSignature?.signatureVersion == "10")
+    #expect(
+      event.messageEventSignature?.messageSigningKeyInfoList?.count == 1)
+    #expect(
+      event.messageEventSignature?.messageSigningKeyInfoList?.first?.memberId
+        == Self.senderId)
   }
 
   /// A v1 message with files derives its id from what identifies it, so
   /// building it again keeps the same id and uploaded files valid.
-  func testV1MediaMessageIdIsStable() throws {
+  @Test func v1MediaMessageIdIsStable() throws {
     let (core, signingKey) = try makeCore(version: .v1)
     let attachments: [AttachmentDescriptor] = [
       .media(
@@ -161,7 +163,7 @@ final class SendTests: XCTestCase {
       conversationKey: Self.conversationKey,
       conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId,
       attachments: attachments)
-    XCTAssertEqual(first.messageId, second.messageId)
+    #expect(first.messageId == second.messageId)
 
     // A different file list gives a different id.
     let third = try core.encryptMessage(
@@ -169,33 +171,32 @@ final class SendTests: XCTestCase {
       conversationKey: Self.conversationKey,
       conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId,
       attachments: [attachments[0]])
-    XCTAssertNotEqual(first.messageId, third.messageId)
+    #expect(first.messageId != third.messageId)
 
     // The media hash keys are collected, banner included.
     let message = try decrypt(first, core: core, signingKey: signingKey)
-    XCTAssertEqual(
-      message.mediaHashes.map(\.mediaHashKey), ["media-a", "banner"])
-    XCTAssertEqual(message.mediaHashes.map(\.source), ["media", "url_banner"])
-    XCTAssertEqual(
-      try XCTUnwrap(message.attachments.first).mediaAttachmentId, first.messageId)
+    #expect(
+      message.mediaHashes.map(\.mediaHashKey) == ["media-a", "banner"])
+    #expect(message.mediaHashes.map(\.source) == ["media", "url_banner"])
+    let attachment = try #require(message.attachments.first)
+    #expect(attachment.mediaAttachmentId == first.messageId)
   }
 
-  func testConversationIdIsCanonicalized() throws {
+  @Test(arguments: ["2222:1111", "2222-1111", "2222"])
+  func conversationIdIsCanonicalized(conversationId: String) throws {
     let (core, signingKey) = try makeCore()
-    for conversationId in ["2222:1111", "2222-1111", "2222"] {
-      let payload = try core.encryptMessage(
-        text: "canonical", conversationId: conversationId,
-        conversationKey: Self.conversationKey,
-        conversationKeyVersion: Self.conversationKeyVersion,
-        senderId: Self.senderId)
-      let message = try decrypt(payload, core: core, signingKey: signingKey)
-      XCTAssertEqual(message.meta.conversationId, "1111:2222", conversationId)
-    }
+    let payload = try core.encryptMessage(
+      text: "canonical", conversationId: conversationId,
+      conversationKey: Self.conversationKey,
+      conversationKeyVersion: Self.conversationKeyVersion,
+      senderId: Self.senderId)
+    let message = try decrypt(payload, core: core, signingKey: signingKey)
+    #expect(message.meta.conversationId == "1111:2222", "\(conversationId)")
   }
 
   // MARK: Replies
 
-  func testReplyEmbedsAndValidatesTheOriginal() throws {
+  @Test func replyEmbedsAndValidatesTheOriginal() throws {
     // The fixture's own keys sign for the fixture sender, so the reply
     // and the original verify under one signing key.
     let core = XChatCore()
@@ -214,42 +215,43 @@ final class SendTests: XCTestCase {
       senderId: Self.senderId)
 
     let message = try decrypt(payload, core: core, signingKey: fixtureSigningKey())
-    XCTAssertEqual(message.text, "a reply")
-    XCTAssertTrue(message.verified)
-    XCTAssertEqual(message.replyPreviewValidation, .valid)
+    #expect(message.text == "a reply")
+    #expect(message.verified)
+    #expect(message.replyPreviewValidation == .valid)
     guard case .text(let content) = message.content else {
-      return XCTFail("expected a text message")
+      Issue.record("expected a text message")
+      return
     }
-    let preview = try XCTUnwrap(content.replyingToPreview)
-    XCTAssertEqual(preview.messageText, TestVectors.string("event_message_text"))
-    XCTAssertEqual(preview.senderId, Self.senderId)
-    XCTAssertTrue(preview.embedsSourceEvent)
+    let preview = try #require(content.replyingToPreview)
+    #expect(preview.messageText == TestVectors.string("event_message_text"))
+    #expect(preview.senderId == Self.senderId)
+    #expect(preview.embedsSourceEvent)
   }
 
   // MARK: Reactions and edits
 
-  func testReactionRoundTrips() throws {
+  @Test func reactionRoundTrips() throws {
     let (core, signingKey) = try makeCore()
     let added = try core.encryptReaction(
       emoji: "👍", targetMessageSequenceId: "5",
       conversationId: Self.conversationId,
       conversationKey: Self.conversationKey,
       conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
-    XCTAssertEqual(
-      try decrypt(added, core: core, signingKey: signingKey).content,
-      .reaction(emoji: "👍", targetMessageSequenceId: "5"))
+    #expect(
+      try decrypt(added, core: core, signingKey: signingKey).content
+        == .reaction(emoji: "👍", targetMessageSequenceId: "5"))
 
     let removed = try core.encryptRemoveReaction(
       emoji: "👍", targetMessageSequenceId: "5",
       conversationId: Self.conversationId,
       conversationKey: Self.conversationKey,
       conversationKeyVersion: Self.conversationKeyVersion, senderId: Self.senderId)
-    XCTAssertEqual(
-      try decrypt(removed, core: core, signingKey: signingKey).content,
-      .reactionRemoved(emoji: "👍", targetMessageSequenceId: "5"))
+    #expect(
+      try decrypt(removed, core: core, signingKey: signingKey).content
+        == .reactionRemoved(emoji: "👍", targetMessageSequenceId: "5"))
   }
 
-  func testEditRoundTrip() throws {
+  @Test func editRoundTrip() throws {
     let (core, signingKey) = try makeCore(version: .v1)
     let payload = try core.encryptEdit(
       targetMessageSequenceId: "5",
@@ -262,19 +264,19 @@ final class SendTests: XCTestCase {
       entities: [EntityDescriptor(start: 0, end: 3, type: .hashtag)])
 
     let message = try decrypt(payload, core: core, signingKey: signingKey)
-    XCTAssertEqual(
-      message.content,
-      .edit(
-        targetMessageSequenceId: "5", targetMessageId: "msg-5",
-        updatedText: "new text",
-        entities: [
-          RichTextEntityInfo(startIndex: 0, endIndex: 3, kind: .hashtag)
-        ]))
+    #expect(
+      message.content
+        == .edit(
+          targetMessageSequenceId: "5", targetMessageId: "msg-5",
+          updatedText: "new text",
+          entities: [
+            RichTextEntityInfo(startIndex: 0, endIndex: 3, kind: .hashtag)
+          ]))
   }
 
   // MARK: Key changes
 
-  func testPreparedKeyChangeRoundTrip() throws {
+  @Test func preparedKeyChangeRoundTrip() throws {
     let core = XChatCore()
     try core.importKeys(
       identityPrivateKey: TestVectors.bytes("identity_private_b64"),
@@ -298,10 +300,10 @@ final class SendTests: XCTestCase {
       senderId: Self.senderId,
       conversationKeyVersion: "5000")
 
-    XCTAssertEqual(prepared.conversationId, Self.conversationId)
-    XCTAssertEqual(prepared.conversationKey.count, 32)
-    XCTAssertEqual(prepared.participantKeys.count, 2)
-    XCTAssertEqual(prepared.actionSignature.signature.signatureVersion, "10")
+    #expect(prepared.conversationId == Self.conversationId)
+    #expect(prepared.conversationKey.count == 32)
+    #expect(prepared.participantKeys.count == 2)
+    #expect(prepared.actionSignature.signature.signatureVersion == "10")
 
     // Rebuild the event the API persists and decrypt it back: the signed
     // detail and signature verify, and the participant key decrypts for
@@ -309,7 +311,8 @@ final class SendTests: XCTestCase {
     let detailBytes = try Base64.decodeStandard(
       prepared.actionSignature.encodedMessageEventDetail)
     var detailReader = ThriftReader(detailBytes)
-    let detail = try XCTUnwrap(MessageEventDetail.read(&detailReader))
+    let readDetail = try MessageEventDetail.read(&detailReader)
+    let detail = try #require(readDetail)
     var event = MessageEvent()
     event.messageId = prepared.actionSignature.messageId
     event.senderId = Self.senderId
@@ -327,21 +330,22 @@ final class SendTests: XCTestCase {
 
     let decrypted = try core.decryptEvent(eventB64, signingKeys: [fixtureSigningKey()])
     guard case .keyChange(let keyChange) = decrypted else {
-      return XCTFail("expected a key change")
+      Issue.record("expected a key change")
+      return
     }
-    XCTAssertTrue(keyChange.verified)
-    XCTAssertEqual(keyChange.conversationKeyVersion, "5000")
+    #expect(keyChange.verified)
+    #expect(keyChange.conversationKeyVersion == "5000")
 
     // A batch adopts the key through this identity's ECIES entry.
     let batch = core.decryptEvents([eventB64], signingKeys: [fixtureSigningKey()])
-    XCTAssertTrue(batch.errors.isEmpty, "errors: \(batch.errors)")
-    XCTAssertEqual(batch.conversationKeys.keys["5000"], prepared.conversationKey)
-    XCTAssertEqual(batch.conversationKeys.latestVersion, "5000")
+    #expect(batch.errors.isEmpty, "errors: \(batch.errors)")
+    #expect(batch.conversationKeys.keys["5000"] == prepared.conversationKey)
+    #expect(batch.conversationKeys.latestVersion == "5000")
   }
 
   // MARK: Validation
 
-  func testSendValidation() throws {
+  @Test func sendValidation() throws {
     let (core, _) = try makeCore()
     func send(
       key: [UInt8] = Self.conversationKey,
@@ -355,48 +359,44 @@ final class SendTests: XCTestCase {
         entities: entities, attachments: attachments)
     }
 
-    XCTAssertThrowsError(try send(key: [UInt8](repeating: 0, count: 31))) { error in
-      XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(31)))
+    #expect(throws: XChatError.invalidInput(.conversationKeyLength(31))) {
+      try send(key: [UInt8](repeating: 0, count: 31))
     }
-    XCTAssertThrowsError(try send(version: "01")) { error in
-      XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyVersion("01")))
+    #expect(throws: XChatError.invalidInput(.conversationKeyVersion("01"))) {
+      try send(version: "01")
     }
-    XCTAssertThrowsError(
+    #expect(
+      throws: XChatError.invalidInput(.entityRange(start: 0, end: 5))
+    ) {
       try send(entities: [EntityDescriptor(start: 0, end: 5, type: .hashtag)])
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .invalidInput(.entityRange(start: 0, end: 5)))
     }
-    XCTAssertThrowsError(
+    #expect(
+      throws: XChatError.invalidInput(.attachment(index: 0, .nonPositiveFilesize))
+    ) {
       try send(attachments: [
         .media(
           mediaHashKey: "h", width: 1, height: 1, filesizeBytes: 0,
           filename: "f", mediaType: nil, durationMilliseconds: nil,
           plaintextSHA256: nil)
       ])
-    ) { error in
-      XCTAssertEqual(
-        error as? XChatError, .invalidInput(.attachment(index: 0, .nonPositiveFilesize)))
     }
-    XCTAssertThrowsError(
+    #expect(
+      throws: XChatError.invalidInput(.attachment(index: 0, .postWithoutReference))
+    ) {
       try send(attachments: [
         .post(restId: nil, postURL: nil)
       ])
-    ) { error in
-      XCTAssertEqual(
-        error as? XChatError, .invalidInput(.attachment(index: 0, .postWithoutReference)))
     }
 
     // Sending needs a signing key and its version.
     let noSigning = XChatCore()
     try noSigning.importKeys(identityPrivateKey: generateKeyPair().privateKey)
-    XCTAssertThrowsError(
+    #expect(throws: XChatError.invalidState(.signingKeyNotLoaded)) {
       try noSigning.encryptMessage(
         text: "x", conversationId: Self.conversationId,
         conversationKey: Self.conversationKey,
         conversationKeyVersion: Self.conversationKeyVersion,
         senderId: Self.senderId)
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .invalidState(.signingKeyNotLoaded))
     }
   }
 }

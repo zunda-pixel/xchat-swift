@@ -1,10 +1,10 @@
-import XCTest
+import Testing
 
 @testable import XChat
 
 /// `crypto_secretstream_xchacha20poly1305` against the core's cross-binding
 /// media vector, plus round trips, rekeying and authentication failures.
-final class SecretStreamTests: XCTestCase {
+struct SecretStreamTests {
   /// The core's media vector: the conversation key is the raw secretstream
   /// key, so this validates header derivation, frame encryption, MACs and
   /// nonce chaining against ciphertext the Rust core produced.
@@ -14,15 +14,15 @@ final class SecretStreamTests: XCTestCase {
 
   /// Guards the fixture's shape: a 24-byte header, one full 1041-byte
   /// frame, and a 493-byte final frame for 476 plaintext bytes.
-  func testVectorShape() throws {
-    XCTAssertEqual(Self.key.count, 32)
-    XCTAssertEqual(Self.plaintext.count, 1500)
-    XCTAssertEqual(Self.encrypted.count, 24 + 1041 + 493)
+  @Test func vectorShape() {
+    #expect(Self.key.count == 32)
+    #expect(Self.plaintext.count == 1500)
+    #expect(Self.encrypted.count == 24 + 1041 + 493)
   }
 
   /// Pulls the vector frame by frame: the first frame is a message and the
   /// last is final.
-  func testVectorOpensFrameByFrame() throws {
+  @Test func vectorOpensFrameByFrame() throws {
     var pull = try SecretStreamPull(header: Array(Self.encrypted[0..<24]), key: Self.key)
     var plaintext: [UInt8] = []
     var tags: [SecretStreamTag] = []
@@ -34,46 +34,45 @@ final class SecretStreamTests: XCTestCase {
       tags.append(tag)
       offset = end
     }
-    XCTAssertEqual(plaintext, Self.plaintext)
-    XCTAssertEqual(tags, [.message, .final])
+    #expect(plaintext == Self.plaintext)
+    #expect(tags == [.message, .final])
   }
 
   /// Round trip at every frame boundary and a partial tail.
-  func testRoundTripAllLengths() throws {
+  @Test(arguments: [0, 1, 15, 16, 17, 63, 64, 65, 1023, 1024, 1025, 2048, 2049])
+  func roundTripAllLengths(length: Int) throws {
     let key = (0..<32).map { UInt8(($0 * 7) % 251) }
     let full = (0..<5000).map { UInt8($0 % 251) }
 
-    for length in [0, 1, 15, 16, 17, 63, 64, 65, 1023, 1024, 1025, 2048, 2049] {
-      let message = Array(full[0..<length])
-      let (header, pusher) = try SecretStreamPush.start(key: key)
-      var push = pusher
-      let frame = try push.push(message, tag: .final)
-      XCTAssertEqual(frame.count, 17 + length, "length \(length)")
+    let message = Array(full[0..<length])
+    let (header, pusher) = try SecretStreamPush.start(key: key)
+    var push = pusher
+    let frame = try push.push(message, tag: .final)
+    #expect(frame.count == 17 + length, "length \(length)")
 
-      var pull = try SecretStreamPull(header: header, key: key)
-      let (decrypted, tag) = try pull.pull(frame)
-      XCTAssertEqual(decrypted, message, "length \(length)")
-      XCTAssertEqual(tag, .final)
-    }
+    var pull = try SecretStreamPull(header: header, key: key)
+    let (decrypted, tag) = try pull.pull(frame)
+    #expect(decrypted == message, "length \(length)")
+    #expect(tag == .final)
   }
 
   /// A frame with an empty message still carries the tag and its MAC.
-  func testEmptyMessage() throws {
+  @Test func emptyMessage() throws {
     let key = TestVectors.bytes("conversation_key_b64")
     let (header, pusher) = try SecretStreamPush.start(key: key)
     var push = pusher
     let frame = try push.push([], tag: .message)
-    XCTAssertEqual(frame.count, 17)
+    #expect(frame.count == 17)
 
     var pull = try SecretStreamPull(header: header, key: key)
     let (decrypted, tag) = try pull.pull(frame)
-    XCTAssertEqual(decrypted, [])
-    XCTAssertEqual(tag, .message)
+    #expect(decrypted == [])
+    #expect(tag == .message)
   }
 
   /// Every tag in sequence, including `rekey`, which rotates the key and
   /// nonce on both sides between frames.
-  func testEveryTagInSequence() throws {
+  @Test func everyTagInSequence() throws {
     let key = TestVectors.bytes("conversation_key_b64")
     let messages: [(SecretStreamTag, [UInt8])] = [
       (.message, Array("first".utf8)),
@@ -94,14 +93,14 @@ final class SecretStreamTests: XCTestCase {
     var pull = try SecretStreamPull(header: header, key: key)
     for (index, (expectedTag, expectedMessage)) in messages.enumerated() {
       let (message, tag) = try pull.pull(frames[index])
-      XCTAssertEqual(tag, expectedTag, "frame \(index)")
-      XCTAssertEqual(message, expectedMessage, "frame \(index)")
+      #expect(tag == expectedTag, "frame \(index)")
+      #expect(message == expectedMessage, "frame \(index)")
     }
   }
 
   /// Associated data is authenticated against the frame, as the reference
   /// test suite's "personal privacy is paramount" example.
-  func testAssociatedDataRoundTrip() throws {
+  @Test func associatedDataRoundTrip() throws {
     let key = TestVectors.bytes("conversation_key_b64")
     let aad = Array("beware of giving it away".utf8)
     let message = Array("personal privacy is paramount".utf8)
@@ -112,61 +111,67 @@ final class SecretStreamTests: XCTestCase {
 
     var pull = try SecretStreamPull(header: header, key: key)
     let (decrypted, _) = try pull.pull(frame, associatedData: aad)
-    XCTAssertEqual(decrypted, message)
+    #expect(decrypted == message)
   }
 
   /// The same frame under different associated data must fail
   /// verification and yield no plaintext.
-  func testAssociatedDataMismatchRejected() throws {
+  @Test func associatedDataMismatchRejected() throws {
     let key = TestVectors.bytes("conversation_key_b64")
     let (header, pusher) = try SecretStreamPush.start(key: key)
     var push = pusher
     let frame = try push.push([1, 2, 3], associatedData: Array("right".utf8), tag: .final)
 
     var pull = try SecretStreamPull(header: header, key: key)
-    XCTAssertThrowsError(try pull.pull(frame, associatedData: Array("wrong".utf8))) { error in
-      XCTAssertEqual(error as? PrimitiveError, .authenticationFailed)
+    #expect(throws: PrimitiveError.authenticationFailed) {
+      try pull.pull(frame, associatedData: Array("wrong".utf8))
     }
   }
 
-  /// Tampering anywhere — header, tag byte, ciphertext, or MAC — is caught
-  /// before any plaintext is produced.
-  func testTamperRejected() throws {
+  /// A header byte changes the derived subkey and nonce, so the first frame
+  /// no longer authenticates.
+  @Test func tamperedHeaderRejected() throws {
     let key = TestVectors.bytes("conversation_key_b64")
-    XCTAssertEqual(Self.encrypted.count, 1558)
+    #expect(Self.encrypted.count == 1558)
 
-    // Header byte: changes the derived subkey and nonce.
     var header = Array(Self.encrypted[0..<24])
     header[0] ^= 1
     var pull = try SecretStreamPull(header: header, key: key)
-    XCTAssertThrowsError(try pull.pull(Array(Self.encrypted[24..<1065])))
-
-    // Encrypted tag byte, ciphertext body, and MAC of the first frame.
-    for index in [24, 25, 100, 1064] {
-      var tampered = Self.encrypted
-      tampered[index] ^= 0x80
-      var framePull = try SecretStreamPull(header: Array(tampered[0..<24]), key: key)
-      XCTAssertThrowsError(
-        try framePull.pull(Array(tampered[24..<1065])), "byte \(index)")
+    #expect(throws: (any Error).self) {
+      try pull.pull(Array(Self.encrypted[24..<1065]))
     }
 
     // The wrong key fails the same way.
     var wrongKey = key
     wrongKey[31] ^= 1
     var wrongKeyPull = try SecretStreamPull(header: Array(Self.encrypted[0..<24]), key: wrongKey)
-    XCTAssertThrowsError(try wrongKeyPull.pull(Array(Self.encrypted[24..<1065])))
+    #expect(throws: (any Error).self) {
+      try wrongKeyPull.pull(Array(Self.encrypted[24..<1065]))
+    }
+  }
+
+  /// Tampering anywhere in the first frame — tag byte, ciphertext body, or
+  /// MAC — is caught before any plaintext is produced.
+  @Test(arguments: [24, 25, 100, 1064])
+  func tamperedFrameRejected(index: Int) throws {
+    let key = TestVectors.bytes("conversation_key_b64")
+    var tampered = Self.encrypted
+    tampered[index] ^= 0x80
+    var framePull = try SecretStreamPull(header: Array(tampered[0..<24]), key: key)
+    #expect(throws: (any Error).self) {
+      try framePull.pull(Array(tampered[24..<1065]))
+    }
   }
 
   /// A frame shorter than the 17-byte overhead is rejected before any MAC
   /// work, and the stream is not advanced.
-  func testShortFrameRejected() throws {
+  @Test(arguments: [0, 1, 16])
+  func shortFrameRejected(length: Int) throws {
     let key = TestVectors.bytes("conversation_key_b64")
     let header = Array(Self.encrypted[0..<24])
-    for length in [0, 1, 16] {
-      var pull = try SecretStreamPull(header: header, key: key)
-      XCTAssertThrowsError(try pull.pull([UInt8](repeating: 0, count: length))) { error in
-        XCTAssertEqual(error as? PrimitiveError, .ciphertextTooShort)
-      }
+    var pull = try SecretStreamPull(header: header, key: key)
+    #expect(throws: PrimitiveError.ciphertextTooShort) {
+      try pull.pull([UInt8](repeating: 0, count: length))
     }
   }
 }

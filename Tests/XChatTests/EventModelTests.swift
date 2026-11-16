@@ -1,31 +1,33 @@
-import XCTest
+import Testing
 
 @testable import XChat
 
 /// The typed event and content models against the cross-binding vectors:
 /// envelopes, message contents, key changes, and every payload
 /// encrypted under the conversation key or a per-message key.
-final class EventModelTests: XCTestCase {
+struct EventModelTests {
   private func decodeEvent(_ field: String) throws -> MessageEvent {
     var reader = ThriftReader(TestVectors.bytes(field))
     let event = try MessageEvent.read(&reader)
-    XCTAssertTrue(reader.isAtEnd)
+    #expect(reader.isAtEnd)
     return event
   }
 
   private func parseHolder(_ bytes: [UInt8]) throws -> MessageEntryHolder {
     var reader = ThriftReader(bytes)
     let holder = try MessageEntryHolder.read(&reader)
-    XCTAssertTrue(reader.isAtEnd)
+    #expect(reader.isAtEnd)
     return holder
   }
 
   private func messageCreate(_ event: MessageEvent) throws -> MessageCreateEvent {
-    let detail = try XCTUnwrap(event.detail)
-    guard case .messageCreate(let create) = detail else {
-      return try XCTUnwrap(nil, "expected a message-create detail, got \(detail)")
-    }
-    return create
+    let detail = try #require(event.detail)
+    let create: MessageCreateEvent? =
+      switch detail {
+      case .messageCreate(let create): create
+      default: nil
+      }
+    return try #require(create, "expected a message-create detail, got \(detail)")
   }
 
   private func text(_ contents: MessageEntryContents?) -> String? {
@@ -37,27 +39,30 @@ final class EventModelTests: XCTestCase {
 
   /// Decodes the message event and decrypts its contents under the
   /// conversation key the vector names.
-  func testVectorMessageEventDecryptsUnderConversationKey() throws {
+  @Test func vectorMessageEventDecryptsUnderConversationKey() throws {
     let event = try decodeEvent("event_message_b64")
-    XCTAssertEqual(event.messageId?.count, 36)
-    XCTAssertEqual(event.senderId, TestVectors.string("event_sender_id"))
-    XCTAssertEqual(event.conversationId, TestVectors.string("event_conversation_id"))
-    XCTAssertEqual(event.createdAtMilliseconds, "1700000000000")
+    #expect(event.messageId?.count == 36)
+    #expect(event.senderId == TestVectors.string("event_sender_id"))
+    #expect(event.conversationId == TestVectors.string("event_conversation_id"))
+    #expect(event.createdAtMilliseconds == "1700000000000")
 
     let create = try messageCreate(event)
-    XCTAssertEqual(create.conversationKeyVersion, "1001")
-    XCTAssertNil(create.contentsEncryptionVersion)
-    let contents = try XCTUnwrap(create.contents)
+    #expect(create.conversationKeyVersion == "1001")
+    #expect(create.contentsEncryptionVersion == nil)
+    let contents = try #require(create.contents)
 
     let plaintext = try decryptMessage(
       key: TestVectors.bytes("conversation_key_b64"), ciphertext: contents)
     let holder = try parseHolder(plaintext)
-    XCTAssertEqual(text(holder.contents), TestVectors.string("event_message_text"))
-    guard case .message(let message) = try XCTUnwrap(holder.contents) else {
-      return XCTFail("expected a text message")
-    }
-    XCTAssertNil(message.entities)
-    XCTAssertNil(message.attachments)
+    #expect(text(holder.contents) == TestVectors.string("event_message_text"))
+    let extractedMessage: MessageContents? =
+      switch holder.contents {
+      case .message(let message)?: message
+      default: nil
+      }
+    let message = try #require(extractedMessage, "expected a text message")
+    #expect(message.entities == nil)
+    #expect(message.attachments == nil)
   }
 
   // MARK: Per-message-key messages (v1)
@@ -65,104 +70,117 @@ final class EventModelTests: XCTestCase {
   /// The v1 vector: contents_encryption_version 1 means the contents are
   /// encrypted under a key derived from the sender and message id, which
   /// the vector gives as a known answer.
-  func testVectorMessageEventDecryptsUnderMessageKey() throws {
+  @Test func vectorMessageEventDecryptsUnderMessageKey() throws {
     let event = try decodeEvent("event_message_key_b64")
     let create = try messageCreate(event)
-    XCTAssertEqual(create.contentsEncryptionVersion, 1)
-    XCTAssertEqual(
-      create.conversationKeyVersion,
-      TestVectors.string("message_key_conversation_key_version"))
+    #expect(create.contentsEncryptionVersion == 1)
+    #expect(
+      create.conversationKeyVersion
+        == TestVectors.string("message_key_conversation_key_version"))
 
-    let messageKey = try XCTUnwrap(
+    let senderId = try #require(event.senderId)
+    let messageId = try #require(event.messageId)
+    let conversationKey = try Hex.decode(
+      TestVectors.string("message_key_conversation_key_hex"))
+    let messageKey = try #require(
       deriveMessageKey(
-        conversationKey: try Hex.decode(
-          TestVectors.string("message_key_conversation_key_hex")),
-        senderId: try XCTUnwrap(event.senderId),
-        messageId: try XCTUnwrap(event.messageId)))
-    XCTAssertEqual(event.senderId, TestVectors.string("message_key_sender_id"))
-    XCTAssertEqual(
-      Hex.encode(messageKey),
-      "4d443b9a862e9584ccd0aee2753162aa7c5c1dbcb5f967610155f65ae41d8084")
+        conversationKey: conversationKey,
+        senderId: senderId,
+        messageId: messageId))
+    #expect(event.senderId == TestVectors.string("message_key_sender_id"))
+    #expect(
+      Hex.encode(messageKey)
+        == "4d443b9a862e9584ccd0aee2753162aa7c5c1dbcb5f967610155f65ae41d8084")
 
     let plaintext = try decryptMessage(
-      key: messageKey, ciphertext: try XCTUnwrap(create.contents))
+      key: messageKey, ciphertext: try #require(create.contents))
     let holder = try parseHolder(plaintext)
-    XCTAssertEqual(text(holder.contents), TestVectors.string("event_message_key_text"))
+    #expect(text(holder.contents) == TestVectors.string("event_message_key_text"))
   }
 
   /// The same path with a short sender id.
-  func testVectorShortMessageEventDecryptsUnderMessageKey() throws {
+  @Test func vectorShortMessageEventDecryptsUnderMessageKey() throws {
     let event = try decodeEvent("event_message_key_short_b64")
     let create = try messageCreate(event)
-    XCTAssertEqual(create.contentsEncryptionVersion, 1)
+    #expect(create.contentsEncryptionVersion == 1)
 
-    let messageKey = try XCTUnwrap(
+    let senderId = try #require(event.senderId)
+    let messageId = try #require(event.messageId)
+    let conversationKey = try Hex.decode(
+      TestVectors.string("message_key_short_conversation_key_hex"))
+    let messageKey = try #require(
       deriveMessageKey(
-        conversationKey: try Hex.decode(
-          TestVectors.string("message_key_short_conversation_key_hex")),
-        senderId: try XCTUnwrap(event.senderId),
-        messageId: try XCTUnwrap(event.messageId)))
-    XCTAssertEqual(event.senderId, TestVectors.string("message_key_short_sender_id"))
+        conversationKey: conversationKey,
+        senderId: senderId,
+        messageId: messageId))
+    #expect(event.senderId == TestVectors.string("message_key_short_sender_id"))
 
     let plaintext = try decryptMessage(
-      key: messageKey, ciphertext: try XCTUnwrap(create.contents))
+      key: messageKey, ciphertext: try #require(create.contents))
     let holder = try parseHolder(plaintext)
-    XCTAssertEqual(
-      text(holder.contents), TestVectors.string("event_message_key_short_text"))
+    #expect(
+      text(holder.contents) == TestVectors.string("event_message_key_short_text"))
   }
 
   // MARK: Key changes
 
   /// Decodes the key-change event and decrypts its participant key with
   /// the vector's identity key.
-  func testVectorKeyChangeEvent() throws {
+  @Test func vectorKeyChangeEvent() throws {
     let event = try decodeEvent("event_key_change_b64")
-    XCTAssertEqual(event.messageId, "kc-msg-1")
-    guard case .conversationKeyChange(let change) = try XCTUnwrap(event.detail) else {
-      return XCTFail("expected a conversation-key-change detail")
-    }
-    XCTAssertEqual(change.conversationKeyVersion, "1001")
-    let participants = try XCTUnwrap(change.conversationParticipantKeys)
-    XCTAssertEqual(participants.count, 1)
-    let participant = try XCTUnwrap(participants.first)
-    XCTAssertEqual(participant.userId, "1111")
-    XCTAssertEqual(
-      participant.publicKeyVersion, TestVectors.string("event_recipient_key_version"))
+    #expect(event.messageId == "kc-msg-1")
+    let extractedChange: ConversationKeyChangeEvent? =
+      switch event.detail {
+      case .conversationKeyChange(let change)?: change
+      default: nil
+      }
+    let change = try #require(
+      extractedChange, "expected a conversation-key-change detail")
+    #expect(change.conversationKeyVersion == "1001")
+    let participants = try #require(change.conversationParticipantKeys)
+    #expect(participants.count == 1)
+    let participant = try #require(participants.first)
+    #expect(participant.userId == "1111")
+    #expect(
+      participant.publicKeyVersion == TestVectors.string("event_recipient_key_version"))
 
     let encrypted = try Base64.decodeStandard(
-      try XCTUnwrap(participant.encryptedConversationKey))
+      try #require(participant.encryptedConversationKey))
     let conversationKey = try decryptWithPrivateKey(
       privateKey: TestVectors.bytes("identity_private_b64"), data: encrypted)
-    XCTAssertEqual(conversationKey, TestVectors.bytes("conversation_key_b64"))
+    #expect(conversationKey == TestVectors.bytes("conversation_key_b64"))
   }
 
   // MARK: Other event variants
 
-  func testVectorFailureEvent() throws {
+  @Test func vectorFailureEvent() throws {
     let event = try decodeEvent("event_failure_b64")
-    XCTAssertEqual(event.messageId, "failure-msg-1")
-    guard case .messageFailure(let failure) = try XCTUnwrap(event.detail) else {
-      return XCTFail("expected a message-failure detail")
-    }
-    XCTAssertNotNil(failure.failureType)
+    #expect(event.messageId == "failure-msg-1")
+    let extractedFailure: MessageFailureEvent? =
+      switch event.detail {
+      case .messageFailure(let failure)?: failure
+      default: nil
+      }
+    let failure = try #require(extractedFailure, "expected a message-failure detail")
+    #expect(failure.failureType != nil)
   }
 
   /// An unencrypted message has no conversation-key version; its contents
   /// are already plaintext Thrift bytes.
-  func testVectorUnencryptedEvent() throws {
+  @Test func vectorUnencryptedEvent() throws {
     let event = try decodeEvent("event_unencrypted_b64")
-    XCTAssertEqual(event.messageId, "plain-msg-1")
+    #expect(event.messageId == "plain-msg-1")
     let create = try messageCreate(event)
-    XCTAssertNil(create.conversationKeyVersion)
-    let holder = try parseHolder(try XCTUnwrap(create.contents))
-    XCTAssertNotNil(text(holder.contents))
+    #expect(create.conversationKeyVersion == nil)
+    let holder = try parseHolder(try #require(create.contents))
+    #expect(text(holder.contents) != nil)
   }
 
   // MARK: Serialization round trips
 
   /// The send path: every modelled struct survives a write/read round trip
   /// unchanged.
-  func testMessageContentRoundTrip() throws {
+  @Test func messageContentRoundTrip() throws {
     let entity = RichTextEntity(
       startIndex: 0, endIndex: 5, content: .mention)
     let media = MediaAttachment(
@@ -221,10 +239,10 @@ final class EventModelTests: XCTestCase {
     var writer = ThriftWriter()
     holder.write(to: &writer)
     let parsed = try parseHolder(writer.data)
-    XCTAssertEqual(parsed, holder)
+    #expect(parsed == holder)
   }
 
-  func testEventRoundTrip() throws {
+  @Test func eventRoundTrip() throws {
     let create = MessageCreateEvent(
       contents: [9, 8, 7],
       conversationKeyVersion: "1001",
@@ -258,36 +276,20 @@ final class EventModelTests: XCTestCase {
     event.write(to: &writer)
     var reader = ThriftReader(writer.data)
     let parsed = try MessageEvent.read(&reader)
-    XCTAssertTrue(reader.isAtEnd)
-    XCTAssertEqual(parsed, event)
+    #expect(reader.isAtEnd)
+    #expect(parsed == event)
   }
 
-  func testReactionAndEditPayloadRoundTrip() throws {
-    let reaction = MessageEntryHolder(
-      contents: .reactionAdd(
-        MessageReactionAdd(
-          messageSequenceId: "5", emoji: "👍", messageAttachmentId: nil)))
-    let edit = MessageEntryHolder(
-      contents: .messageEdit(
-        MessageEdit(
-          messageSequenceId: "5",
-          updatedText: "new",
-          entities: [RichTextEntity(startIndex: 0, endIndex: 3, content: .hashtag)],
-          messageId: "msg-5")))
-    let readMarker = MessageEntryHolder(
-      contents: .markConversationRead(
-        MarkConversationRead(seenUntilSequenceId: "9", seenAtMilliseconds: 1)))
-
-    for holder in [reaction, edit, readMarker] {
-      var writer = ThriftWriter()
-      holder.write(to: &writer)
-      XCTAssertEqual(try parseHolder(writer.data), holder)
-    }
+  @Test(arguments: entryRoundTripCases)
+  func reactionAndEditPayloadRoundTrip(holder: MessageEntryHolder) throws {
+    var writer = ThriftWriter()
+    holder.write(to: &writer)
+    #expect(try parseHolder(writer.data) == holder)
   }
 
   /// A union variant this SDK does not model is read as `.unsupported`
   /// with its tag, so callers can tell it apart from modelled events.
-  func testUnmodelledDetailIsReportedByFieldId() throws {
+  @Test func unmodelledDetailIsReportedByFieldId() throws {
     var writer = ThriftWriter()
     writer.writeFieldBegin(id: 17, type: .structure)
     writer.writeFieldStop()
@@ -295,7 +297,7 @@ final class EventModelTests: XCTestCase {
 
     var reader = ThriftReader(writer.data)
     let detail = try MessageEventDetail.read(&reader)
-    XCTAssertEqual(detail, .unsupported(fieldId: 17))
+    #expect(detail == .unsupported(fieldId: 17))
 
     var contentsWriter = ThriftWriter()
     contentsWriter.writeFieldBegin(id: 17, type: .structure)
@@ -303,6 +305,24 @@ final class EventModelTests: XCTestCase {
     contentsWriter.writeFieldStop()
     var contentsReader = ThriftReader(contentsWriter.data)
     let contents = try MessageEntryContents.read(&contentsReader)
-    XCTAssertEqual(contents, .unsupported(fieldId: 17))
+    #expect(contents == .unsupported(fieldId: 17))
   }
 }
+
+/// Payloads the send path writes and reads back.
+private let entryRoundTripCases: [MessageEntryHolder] = [
+  MessageEntryHolder(
+    contents: .reactionAdd(
+      MessageReactionAdd(
+        messageSequenceId: "5", emoji: "👍", messageAttachmentId: nil))),
+  MessageEntryHolder(
+    contents: .messageEdit(
+      MessageEdit(
+        messageSequenceId: "5",
+        updatedText: "new",
+        entities: [RichTextEntity(startIndex: 0, endIndex: 3, content: .hashtag)],
+        messageId: "msg-5"))),
+  MessageEntryHolder(
+    contents: .markConversationRead(
+      MarkConversationRead(seenUntilSequenceId: "9", seenAtMilliseconds: 1))),
+]
