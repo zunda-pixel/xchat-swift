@@ -115,6 +115,8 @@ extension XChatError.InputFailure {
     case .conversationIdContainsComma(let value):
       "Invalid conversation_id '\(value)': must not contain a comma, which separates the "
         + "components of the signed payload"
+    case .emptyConversationId:
+      "Invalid conversation_id: must not be empty"
     case .noParticipants:
       "Invalid public_keys: must not be empty"
     case .conversationIdNotDerivable(let distinctUsers):

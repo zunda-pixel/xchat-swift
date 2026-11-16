@@ -257,17 +257,12 @@ final class EventSignatureTests: XCTestCase {
   /// a conversation id with a comma, the only component a caller passes
   /// that can hold one, before signing (`conversationIdContainsComma`).
   func testCommaInComponentIsRefused() throws {
-    let events = [
-      messageEvent(messageId: "m,1", signatureVersion: "7"),
-      messageEvent(conversationId: "c,1", signatureVersion: "7"),
-    ]
-    for event in events {
-      XCTAssertNil(eventSignaturePayload(event: event, detail: try detail(of: event)))
-      XCTAssertEqual(
-        checkEventSignature(
-          event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
-        .unverifiable)
-    }
+    let event = messageEvent(messageId: "m,1", signatureVersion: "7")
+    XCTAssertNil(eventSignaturePayload(event: event, detail: try detail(of: event)))
+    XCTAssertEqual(
+      checkEventSignature(
+        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
+      .unverifiable)
   }
 
   // MARK: Version bounds

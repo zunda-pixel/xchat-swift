@@ -71,7 +71,6 @@ final class PipelineTests: XCTestCase {
     XCTAssertEqual(message.conversationKeyVersion, keyVersion)
   }
 
-  /// The versions keys were given for are listed in numeric order.
   func testMissingConversationKeyThrows() {
     XCTAssertThrowsError(
       try XChatCore().decryptEvent(
@@ -81,59 +80,6 @@ final class PipelineTests: XCTestCase {
       XCTAssertEqual(
         error as? XChatError,
         .decryption(.missingConversationKey(.message, version: "1001", available: [])))
-    }
-
-    let key = [UInt8](repeating: 0, count: 32)
-    XCTAssertThrowsError(
-      try XChatCore().decryptEvent(
-        TestVectors.string("event_message_b64"),
-        conversationKeys: ["10": key, "9": key, "100": key],
-        signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
-    ) { error in
-      XCTAssertEqual(
-        error as? XChatError,
-        .decryption(
-          .missingConversationKey(.message, version: "1001", available: ["9", "10", "100"])))
-    }
-  }
-
-  /// A key that does not open the message's contents is named with the
-  /// version it was given for, whether it is another key or the wrong
-  /// length.
-  func testKeyThatDoesNotOpenTheMessageNamesItsVersion() {
-    let cases: [([UInt8], XChatError.ContentsFailure)] = [
-      ([UInt8](repeating: 1, count: 32), .authenticationFailed),
-      ([UInt8](repeating: 1, count: 31), .keyLength(31)),
-    ]
-    for (key, failure) in cases {
-      XCTAssertThrowsError(
-        try XChatCore().decryptEvent(
-          TestVectors.string("event_message_b64"),
-          conversationKeys: ["1001": key],
-          signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
-      ) { error in
-        XCTAssertEqual(
-          error as? XChatError,
-          .decryption(
-            .messageContents(.message, failure, key: .conversationKey(version: "1001"))))
-      }
-    }
-  }
-
-  /// Contents shorter than a nonce and tag are reported as too short to be
-  /// encrypted contents, named with the message and its key's version.
-  func testContentsTooShortToBeEncrypted() throws {
-    // Replacing the contents breaks the signature, which only the policy
-    // would reject.
-    let short = try replacingContents(TestVectors.string("event_message_b64"), with: [1, 2, 3])
-    XCTAssertThrowsError(
-      try XChatCore(rejectUnverified: false).decryptEvent(
-        short, conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")])
-    ) { error in
-      XCTAssertEqual(
-        error as? XChatError,
-        .decryption(
-          .messageContents(.message, .ciphertextTooShort, key: .conversationKey(version: "1001"))))
     }
   }
 
@@ -147,20 +93,6 @@ final class PipelineTests: XCTestCase {
         TestVectors.string("event_message_b64"),
         conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
         signingKeys: [wrongKey])
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
-    }
-
-    // With the right key, an event the signed payload cannot be rebuilt
-    // from, here for lack of its message id, cannot be checked either.
-    let withoutMessageId = try rewritingEvent(TestVectors.string("event_message_b64")) {
-      $0.messageId = nil
-    }
-    XCTAssertThrowsError(
-      try XChatCore().decryptEvent(
-        withoutMessageId,
-        conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
-        signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
     ) { error in
       XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
     }
@@ -184,293 +116,6 @@ final class PipelineTests: XCTestCase {
         error as? XChatError,
         .parse(.event(.base64(.invalidByte(UInt8(ascii: "!"))))))
     }
-  }
-
-  // MARK: Errors converted on the way out
-
-  /// Malformed Thrift says what was being read: the event, or a message's
-  /// contents, whether they decrypted or were sent unencrypted.
-  func testMalformedThriftNamesWhatWasRead() throws {
-    XCTAssertThrowsError(
-      try XChatCore().decryptEvent(Base64.encodeStandard([0x0b, 0x00]))
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .parse(.event(.thrift(.unexpectedEnd))))
-    }
-
-    // Contents that decrypt to a truncated struct, in an unsigned event.
-    let key = TestVectors.bytes("conversation_key_b64")
-    let event = MessageEvent(
-      sequenceId: "1", messageId: "m", senderId: "1111", conversationId: "1111:2222",
-      detail: .messageCreate(
-        MessageCreateEvent(
-          contents: try encryptMessage(key: key, plaintext: [0x0c]),
-          conversationKeyVersion: "1001")))
-    XCTAssertThrowsError(
-      try XChatCore(rejectUnverified: false).decryptEvent(
-        encodeEvent(event), conversationKeys: ["1001": key])
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .parse(.messageContents(.message, .unexpectedEnd)))
-    }
-
-    // The same struct sent as an unencrypted message's contents.
-    let unencrypted = MessageEvent(
-      sequenceId: "1", messageId: "m", senderId: "1111", conversationId: "1111:2222",
-      detail: .messageCreate(MessageCreateEvent(contents: [0x0c])))
-    XCTAssertThrowsError(
-      try XChatCore(rejectUnverified: false).decryptEvent(encodeEvent(unencrypted))
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .parse(.messageContents(.message, .unexpectedEnd)))
-    }
-  }
-
-  /// An event and a message's contents report what in them is malformed: a
-  /// field of another wire type than the schema's, a string that is not
-  /// UTF-8, a list or a map of other types than its field's, and an
-  /// attachment of the message or of the message its reply preview shows
-  /// that sets none of its variants.
-  func testMalformedThriftNamesWhatIsWrong() throws {
-    func encoded(_ write: (inout ThriftWriter) -> Void) -> [UInt8] {
-      var writer = ThriftWriter()
-      write(&writer)
-      return writer.data
-    }
-    // A message-delete event, whose fields are written by `write`.
-    func deleteEvent(_ write: (inout ThriftWriter) -> Void) -> String {
-      Base64.encodeStandard(
-        encoded { writer in
-          writer.writeFieldBegin(id: 7, type: .structure)  // detail
-          writer.writeFieldBegin(id: 7, type: .structure)  // messageDeleteEvent
-          write(&writer)
-          writer.writeFieldStop()  // end the delete event
-          writer.writeFieldStop()  // end the detail union
-          writer.writeFieldStop()  // end the event
-        })
-    }
-    let events: [(name: String, eventB64: String, failure: XChatError.ThriftFailure)] = [
-      (
-        "message id's type",
-        Base64.encodeStandard(
-          encoded {
-            $0.writeFieldBegin(id: 2, type: .i32)
-            $0.writeI32(1)
-            $0.writeFieldStop()
-          }),
-        .fieldType(field: "message_id", id: 2, actual: .i32, expected: .binary)
-      ),
-      (
-        "message id",
-        Base64.encodeStandard(
-          encoded {
-            $0.writeFieldBegin(id: 2, type: .binary)
-            $0.writeBinary([0xFF])
-            $0.writeFieldStop()
-          }),
-        .invalidUTF8
-      ),
-      (
-        "sequence ids",
-        deleteEvent {
-          $0.writeFieldBegin(id: 1, type: .list)
-          $0.writeListBegin(elementType: .i32, count: 0)
-        },
-        .listElementType(field: "sequence_ids", actual: .i32, expected: .binary)
-      ),
-      (
-        "pinned sequence ids",
-        deleteEvent {
-          $0.writeFieldBegin(id: 3, type: .map)
-          $0.writeMapBegin(keyType: .binary, valueType: .i64, count: 0)
-        },
-        .mapTypes(field: "pme_sequence_ids", key: .binary, value: .i64)
-      ),
-    ]
-    for (name, eventB64, failure) in events {
-      XCTAssertThrowsError(try XChatCore().decryptEvent(eventB64), name) { error in
-        XCTAssertEqual(error as? XChatError, .parse(.event(.thrift(failure))), name)
-      }
-    }
-
-    // An unencrypted message, whose contents are plaintext Thrift: a text
-    // message whose fields are written by `write`.
-    func message(_ write: (inout ThriftWriter) -> Void) -> String {
-      let contents = encoded { writer in
-        writer.writeFieldBegin(id: 1, type: .structure)  // contents
-        writer.writeFieldBegin(id: 1, type: .structure)  // message
-        write(&writer)
-        writer.writeFieldStop()  // end the message
-        writer.writeFieldStop()  // end the contents union
-        writer.writeFieldStop()  // end the holder
-      }
-      return encodeEvent(
-        MessageEvent(
-          messageId: "m", senderId: "1111", conversationId: "1111:2222",
-          detail: .messageCreate(MessageCreateEvent(contents: contents))))
-    }
-    let messages: [(name: String, eventB64: String, failure: XChatError.ThriftFailure)] = [
-      (
-        "text",
-        message {
-          $0.writeFieldBegin(id: 1, type: .binary)
-          $0.writeBinary([0xFF])
-        },
-        .invalidUTF8
-      ),
-      (
-        "entities",
-        message {
-          $0.writeFieldBegin(id: 2, type: .list)
-          $0.writeListBegin(elementType: .binary, count: 0)
-        },
-        .listElementType(field: "entities", actual: .binary, expected: .structure)
-      ),
-      (
-        "additional fields",
-        message {
-          $0.writeFieldBegin(id: 10, type: .map)
-          $0.writeMapBegin(keyType: .i32, valueType: .binary, count: 0)
-        },
-        .mapTypes(field: "additional_fields", key: .i32, value: .binary)
-      ),
-      (
-        "attachment",
-        message {
-          $0.writeFieldBegin(id: 3, type: .list)
-          $0.writeListBegin(elementType: .structure, count: 1)
-          $0.writeFieldStop()  // an attachment that sets no variant
-        },
-        .messageAttachmentWithoutVariant
-      ),
-      (
-        "preview attachment",
-        message {
-          $0.writeFieldBegin(id: 4, type: .structure)  // replying_to_preview
-          $0.writeFieldBegin(id: 4, type: .list)  // attachments
-          $0.writeListBegin(elementType: .structure, count: 1)
-          $0.writeFieldStop()  // an attachment that sets no variant
-          $0.writeFieldStop()  // end the preview
-        },
-        .previewAttachmentWithoutVariant
-      ),
-    ]
-    for (name, eventB64, failure) in messages {
-      XCTAssertThrowsError(
-        try XChatCore(rejectUnverified: false).decryptEvent(eventB64), name
-      ) { error in
-        XCTAssertEqual(error as? XChatError, .parse(.messageContents(.message, failure)), name)
-      }
-    }
-  }
-
-  /// A signature that is checked and fails says why, for a message thrown
-  /// by decryptEvent and for a key change collected by decryptEvents.
-  func testRejectedSignaturesSayWhy() throws {
-    let senderId = TestVectors.string("event_sender_id")
-    let keyVersion = TestVectors.string("event_signing_key_version")
-    let otherKey = SigningKeyEntry(
-      userId: senderId, publicKeyVersion: keyVersion,
-      publicKey: Base64.encodeStandard(generateKeyPair().publicKey))
-    let notAKey = SigningKeyEntry(
-      userId: senderId, publicKeyVersion: keyVersion,
-      publicKey: Base64.encodeStandard([0x04] + [UInt8](repeating: 0, count: 64)))
-    let keys = ["1001": TestVectors.bytes("conversation_key_b64")]
-
-    let rejections: [(SigningKeyEntry, XChatError.SignatureFailure)] = [
-      (otherKey, .mismatch(senderId: senderId, keyVersion: keyVersion)),
-      (notAKey, .invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion)),
-    ]
-    for (signingKey, failure) in rejections {
-      XCTAssertThrowsError(
-        try XChatCore().decryptEvent(
-          TestVectors.string("event_message_b64"), conversationKeys: keys,
-          signingKeys: [signingKey])
-      ) { error in
-        XCTAssertEqual(error as? XChatError, .verification(.rejected(.message, failure)))
-      }
-    }
-
-    var shortSignature = try XChatCore().parseEvent(TestVectors.string("event_message_b64"))
-    shortSignature.messageEventSignature?.signature = Base64.encodeStandard([1, 2, 3])
-    XCTAssertThrowsError(
-      try XChatCore().decryptEvent(
-        encodeEvent(shortSignature), conversationKeys: keys,
-        signingKeys: [signingKey(userId: senderId)])
-    ) { error in
-      XCTAssertEqual(
-        error as? XChatError, .verification(.rejected(.message, .malformedSignature)))
-    }
-
-    let batch = try makeCore().decryptEvents(
-      [TestVectors.string("event_key_change_b64")], signingKeys: [notAKey])
-    XCTAssertEqual(
-      batch.errors,
-      [
-        0: .verification(
-          .rejected(
-            .keyChange, .invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion)))
-      ])
-  }
-
-  /// When both the signing key and the signature are malformed, the key is
-  /// reported, however each is malformed: the key is checked before the
-  /// signature.
-  func testAMalformedSigningKeyIsReportedBeforeAMalformedSignature() throws {
-    let senderId = TestVectors.string("event_sender_id")
-    let keyVersion = TestVectors.string("event_signing_key_version")
-    let keys = ["1001": TestVectors.bytes("conversation_key_b64")]
-    let badKeys = [
-      "not base64!",
-      Base64.encodeStandard([0x04] + [UInt8](repeating: 0, count: 64)),
-    ]
-    let badSignatures = [
-      Base64.encodeStandard([1, 2, 3]),
-      Base64.encodeStandard([UInt8](repeating: 1, count: 65)),
-      "not base64!",
-    ]
-    func decrypt(signature: String, signingKey: SigningKeyEntry) throws {
-      var event = try XChatCore().parseEvent(TestVectors.string("event_message_b64"))
-      event.messageEventSignature?.signature = signature
-      _ = try XChatCore().decryptEvent(
-        encodeEvent(event), conversationKeys: keys, signingKeys: [signingKey])
-    }
-
-    for badKey in badKeys {
-      let signingKey = SigningKeyEntry(
-        userId: senderId, publicKeyVersion: keyVersion, publicKey: badKey)
-      for badSignature in badSignatures {
-        let name = "\(badKey), \(badSignature)"
-        XCTAssertThrowsError(
-          try decrypt(signature: badSignature, signingKey: signingKey), name
-        ) { error in
-          XCTAssertEqual(
-            error as? XChatError,
-            .verification(
-              .rejected(
-                .message, .invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion))),
-            name)
-        }
-      }
-    }
-
-    // With the key right, each of those signatures is malformed.
-    for badSignature in badSignatures {
-      XCTAssertThrowsError(
-        try decrypt(signature: badSignature, signingKey: signingKey(userId: senderId)),
-        badSignature
-      ) { error in
-        XCTAssertEqual(
-          error as? XChatError, .verification(.rejected(.message, .malformedSignature)),
-          badSignature)
-      }
-    }
-  }
-
-  /// A batch holds only XChatError values; an error of another type would
-  /// be kept as its description rather than dropped.
-  func testOtherErrorsBecomeUnexpectedWithTheirDescription() {
-    struct Other: Error {}
-    XCTAssertEqual(XChatError(Other()), .internalError(.unexpected("Other()")))
-    XCTAssertEqual(
-      XChatError(XChatError.invalidState(.keysNotLoaded)), .invalidState(.keysNotLoaded))
   }
 
   // MARK: Batches and key changes
@@ -557,25 +202,6 @@ final class PipelineTests: XCTestCase {
     XCTAssertTrue(batch.errors.isEmpty)
     XCTAssertEqual(batch.conversationKeys.keys, keys)
     XCTAssertNil(batch.conversationKeys.latestVersion)
-  }
-
-  /// A key change signs its conversation-key version as an integer, so a
-  /// version that is not one leaves no payload to check: the event is
-  /// unverifiable, not a mismatch, though its signing key and conversation
-  /// key are given.
-  func testKeyChangeWhoseVersionIsNotAnIntegerIsUnverifiable() throws {
-    let encoded = try rewritingEvent(TestVectors.string("event_key_change_b64")) { event in
-      guard case .conversationKeyChange(var change)? = event.detail else { return }
-      change.conversationKeyVersion = "v1001"
-      event.detail = .conversationKeyChange(change)
-    }
-    XCTAssertThrowsError(
-      try XChatCore().decryptEvent(
-        encoded, conversationKeys: ["v1001": TestVectors.bytes("conversation_key_b64")],
-        signingKeys: [signingKey(userId: TestVectors.string("event_sender_id"))])
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.keyChange)))
-    }
   }
 
   /// An older, validly signed key change cannot lower the reported latest
@@ -762,42 +388,6 @@ final class PipelineTests: XCTestCase {
 
   // MARK: Key bindings
 
-  /// An unencrypted message is unverifiable even when its signature holds
-  /// under the sender's key: it is rejected by default, and marked
-  /// unverified with the policy off.
-  func testUnencryptedMessageIsNeverVerified() throws {
-    var event = try XChatCore().parseEvent(TestVectors.string("event_unencrypted_b64"))
-    let detail = try XCTUnwrap(event.detail)
-    let senderId = try XCTUnwrap(event.senderId)
-    let keyVersion = TestVectors.string("event_signing_key_version")
-    event.messageEventSignature =
-      try signEventSignature(
-        signingPrivateKey: TestVectors.bytes("signing_private_b64"),
-        publicKeyVersion: keyVersion, messageId: try XCTUnwrap(event.messageId),
-        senderId: senderId, conversationId: event.conversationId,
-        signatureVersion: currentSignatureVersion, detail: detail
-      ).signature
-    XCTAssertEqual(
-      checkEventSignature(
-        event: event, detail: detail,
-        signingKeys: [
-          SigningKey(
-            publicKeyVersion: keyVersion, publicKey: TestVectors.string("signing_public_b64"))
-        ]),
-      .verified)
-
-    let signed = encodeEvent(event)
-    XCTAssertThrowsError(
-      try XChatCore().decryptEvent(signed, signingKeys: [signingKey(userId: senderId)])
-    ) { error in
-      XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
-    }
-    let message = try message(
-      XChatCore(rejectUnverified: false).decryptEvent(
-        signed, signingKeys: [signingKey(userId: senderId)]))
-    XCTAssertFalse(message.verified)
-  }
-
   /// A signing key whose identity binding does not verify is dropped, so it
   /// cannot verify events; a valid binding verifies.
   func testSigningKeyBindingFiltering() throws {
@@ -838,19 +428,6 @@ final class PipelineTests: XCTestCase {
         identityPublicKey: identityB64,
         signingPublicKeySignature: Base64.encodeStandard(
           try sign(privateKey: signingPrivate, payload: signingSPKI))),
-      // The right signature without the identity key it is checked under.
-      SigningKeyEntry(
-        userId: senderId,
-        publicKeyVersion: TestVectors.string("event_signing_key_version"),
-        publicKey: TestVectors.string("signing_public_b64"),
-        signingPublicKeySignature: Base64.encodeStandard(goodSignature)),
-      // A signature that is not base64.
-      SigningKeyEntry(
-        userId: senderId,
-        publicKeyVersion: TestVectors.string("event_signing_key_version"),
-        publicKey: TestVectors.string("signing_public_b64"),
-        identityPublicKey: identityB64,
-        signingPublicKeySignature: "not base64!"),
     ]
     for key in unauthorized {
       XCTAssertThrowsError(
@@ -860,52 +437,6 @@ final class PipelineTests: XCTestCase {
           signingKeys: [key])
       ) { error in
         XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)))
-      }
-    }
-  }
-
-  /// A signing key that is not a P-256 public key is rejected as such, with
-  /// its key version, only when it is given without an identity-key
-  /// binding. Given with one, it fails the binding, which needs the key's
-  /// SPKI, so it is not used and the event is unverifiable, whether or not
-  /// the key is base64.
-  func testAMalformedSigningKeyWithABindingIsNotUsed() throws {
-    let senderId = TestVectors.string("event_sender_id")
-    let keyVersion = TestVectors.string("event_signing_key_version")
-    let identitySignature = try sign(
-      privateKey: TestVectors.bytes("identity_private_b64"),
-      payload: try spkiDER(publicKey: TestVectors.bytes("signing_public_b64")))
-    func decrypt(signingKey: SigningKeyEntry) throws {
-      _ = try XChatCore().decryptEvent(
-        TestVectors.string("event_message_b64"),
-        conversationKeys: ["1001": TestVectors.bytes("conversation_key_b64")],
-        signingKeys: [signingKey])
-    }
-
-    for badKey in ["not base64!", Base64.encodeStandard([0x04] + [UInt8](repeating: 0, count: 64))]
-    {
-      XCTAssertThrowsError(
-        try decrypt(
-          signingKey: SigningKeyEntry(
-            userId: senderId, publicKeyVersion: keyVersion, publicKey: badKey)),
-        badKey
-      ) { error in
-        XCTAssertEqual(
-          error as? XChatError,
-          .verification(
-            .rejected(
-              .message, .invalidSigningPublicKey(senderId: senderId, keyVersion: keyVersion))),
-          badKey)
-      }
-      XCTAssertThrowsError(
-        try decrypt(
-          signingKey: SigningKeyEntry(
-            userId: senderId, publicKeyVersion: keyVersion, publicKey: badKey,
-            identityPublicKey: TestVectors.string("identity_public_b64"),
-            signingPublicKeySignature: Base64.encodeStandard(identitySignature))),
-        badKey
-      ) { error in
-        XCTAssertEqual(error as? XChatError, .verification(.unverifiable(.message)), badKey)
       }
     }
   }

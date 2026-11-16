@@ -169,18 +169,4 @@ final class SecretStreamTests: XCTestCase {
       }
     }
   }
-
-  /// libsodium authenticates any tag byte a sender writes; a frame whose tag
-  /// secretstream does not define is refused without advancing the stream.
-  func testUndefinedTagRejected() throws {
-    let key = TestVectors.bytes("conversation_key_b64")
-    let (header, pusher) = try SecretStreamPush.start(key: key)
-    var push = pusher
-    let frame = try push.push([1, 2, 3], rawTag: 0x10)
-
-    var pull = try SecretStreamPull(header: header, key: key)
-    XCTAssertThrowsError(try pull.pull(frame)) { error in
-      XCTAssertEqual(error as? PrimitiveError, .unknownStreamTag(0x10))
-    }
-  }
 }

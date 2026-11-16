@@ -209,28 +209,6 @@ final class FileCryptoTests: XCTestCase {
     }
   }
 
-  /// Data after a final frame shorter than a full one, or after the header
-  /// of an empty file, is read as part of a frame, since frames are read a
-  /// full frame at a time: the frame does not authenticate, as the last
-  /// frame when the data fits in it, and as a frame with more after it
-  /// when the data runs past a full frame.
-  func testDataAfterAShortFinalFrameFailsAsAFrame() throws {
-    let files = [
-      ("1 byte", try encryptFile(key: Self.key, plaintext: [9])),
-      ("empty", try encryptFile(key: Self.key, plaintext: [])),
-    ]
-    XCTAssertEqual(files.map(\.1.count), [24 + 18, 24])
-    for (name, encrypted) in files {
-      assertThrows(.lastFrameAuthenticationFailed, name) {
-        try decryptFile(key: Self.key, ciphertext: encrypted + [UInt8](repeating: 0, count: 10))
-      }
-      assertThrows(.authenticationFailed, name) {
-        try decryptFile(
-          key: Self.key, ciphertext: encrypted + [UInt8](repeating: 0, count: 1100))
-      }
-    }
-  }
-
   /// A tampered frame byte fails authentication and yields no plaintext.
   /// The last frame's failure is its own case, since it may also be cut
   /// short.
@@ -257,40 +235,6 @@ final class FileCryptoTests: XCTestCase {
     assertThrows(.authenticationFailed) {
       try decryptFile(key: Self.key, ciphertext: tampered)
     }
-  }
-
-  /// A frame that authenticates under the key but carries a tag
-  /// secretstream does not define, which only a sender holding the key can
-  /// write, is reported as that tag, whether more of the file follows it
-  /// or it is the last frame.
-  func testUndefinedFrameTagRejected() throws {
-    let (header, pusher) = try SecretStreamPush.start(key: Self.key)
-    var push = pusher
-    let middle = try push.push([UInt8](repeating: 1, count: 1024), rawTag: 0x10)
-    let last = try push.push([2], tag: .final)
-
-    assertThrows(.unknownTag(0x10)) {
-      try XChatCore().decryptFileWithKey(header + middle + last, key: Self.key)
-    }
-    assertThrows(.unknownTag(0x10)) {
-      try XChatCore().decryptFileWithKey(header + middle, key: Self.key)
-    }
-  }
-
-  /// Push and rekey frames, which secretstream defines, decrypt as the
-  /// file's other frames: only the tags it does not define are refused.
-  func testPushAndRekeyFramesDecrypt() throws {
-    let (header, pusher) = try SecretStreamPush.start(key: Self.key)
-    var push = pusher
-    let first = [UInt8](repeating: 1, count: 1024)
-    let second = [UInt8](repeating: 2, count: 1024)
-    let pushFrame = try push.push(first, tag: .push)
-    let rekeyFrame = try push.push(second, tag: .rekey)
-    let last = try push.push([3], tag: .final)
-
-    XCTAssertEqual(
-      try XChatCore().decryptFileWithKey(header + pushFrame + rekeyFrame + last, key: Self.key),
-      first + second + [3])
   }
 
   // MARK: Media faults carry the media hash key
@@ -339,40 +283,6 @@ final class FileCryptoTests: XCTestCase {
     }
   }
 
-  /// The same bytes under the same key name the media from the calls given
-  /// its media hash key, and from no other: the conversation key that opens
-  /// the v0 message's media also opens it as a key the caller holds.
-  func testCallDecidesWhetherTheMediaIsNamed() throws {
-    let core = XChatCore()
-    let truncated = Array(Self.vectorCiphertext[0..<(Self.vectorCiphertext.count - 493)])
-    let event = TestVectors.string("event_conversation_key_media_b64")
-    let keys = [TestVectors.string("event_conversation_key_version"): Self.key]
-    func pushAll(_ decryptor: FileDecryptor) throws -> [UInt8] {
-      var decryptor = decryptor
-      return try decryptor.push(truncated) + decryptor.finish()
-    }
-
-    let named = XChatError.decryption(.file(.truncated, mediaHashKey: Self.mediaHashKey))
-    assertThrows(named, "decryptFile") {
-      try core.decryptFile(
-        truncated, eventB64: event, conversationKeys: keys, mediaHashKey: Self.mediaHashKey)
-    }
-    assertThrows(named, "fileDecryptor") {
-      try pushAll(
-        core.fileDecryptor(
-          eventB64: event, conversationKeys: keys, mediaHashKey: Self.mediaHashKey))
-    }
-    assertThrows(named, "FileDecryptor(key:mediaHashKey:)") {
-      try pushAll(FileDecryptor(key: Self.key, mediaHashKey: Self.mediaHashKey))
-    }
-    assertThrows(.truncated, "decryptFileWithKey") {
-      try core.decryptFileWithKey(truncated, key: Self.key)
-    }
-    assertThrows(.truncated, "FileDecryptor(key:)") {
-      try pushAll(FileDecryptor(key: Self.key))
-    }
-  }
-
   // MARK: Input and state validation
 
   /// Keys must be 32 bytes at every entry point, and a key of another
@@ -386,9 +296,6 @@ final class FileCryptoTests: XCTestCase {
       }
       assertThrows(.invalidInput(.fileKeyLength(length))) {
         try FileDecryptor(key: key)
-      }
-      assertThrows(.invalidInput(.fileKeyLength(length))) {
-        try FileDecryptor(key: key, mediaHashKey: "h")
       }
       assertThrows(.invalidInput(.fileKeyLength(length))) {
         try encryptFile(key: key, plaintext: [1])

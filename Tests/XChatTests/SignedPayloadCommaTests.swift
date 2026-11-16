@@ -68,10 +68,11 @@ private let commaWithMark = ",\u{301}"
 }
 
 /// No payload is built from an event any of whose components holds a
-/// comma that a combining mark follows, so its signature is not checked
-/// and the event is unverifiable: the payload's bytes could be read as
-/// other components.
-@Test func aCommaThatACombiningMarkFollowsLeavesNoPayload() throws {
+/// comma, bare or followed by a combining mark, so its signature is not
+/// checked and the event is unverifiable: the payload's bytes could be
+/// read as other components.
+@Test(arguments: [",", commaWithMark])
+func aCommaInAComponentLeavesNoPayload(comma: String) throws {
   let detail = MessageEventDetail.messageCreate(
     MessageCreateEvent(
       contents: [1], conversationKeyVersion: "9", shouldNotify: nil, ttlMilliseconds: nil,
@@ -93,16 +94,16 @@ private let commaWithMark = ",\u{301}"
     return event
   }
 
-  // Without the mark the payload builds, and the signature is checked.
+  // Without the comma the payload builds, and the signature is checked.
   #expect(eventSignaturePayload(event: event { _ in }, detail: detail) != nil)
   #expect(
     checkEventSignature(event: event { _ in }, detail: detail, signingKeys: [signingKey])
       == .failed(.mismatch(senderId: "1111", keyVersion: "1")))
 
   let events = [
-    ("message id", event { $0.messageId = "m\(commaWithMark)1" }),
-    ("sender id", event { $0.senderId = "1111\(commaWithMark)" }),
-    ("conversation id", event { $0.conversationId = "1111\(commaWithMark)2222" }),
+    ("message id", event { $0.messageId = "m\(comma)1" }),
+    ("sender id", event { $0.senderId = "1111\(comma)" }),
+    ("conversation id", event { $0.conversationId = "1111\(comma)2222" }),
   ]
   for (component, event) in events {
     #expect(eventSignaturePayload(event: event, detail: detail) == nil, "\(component)")

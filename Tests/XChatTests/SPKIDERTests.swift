@@ -17,6 +17,20 @@ struct SPKIDERTests {
     #expect(try core.getPublicKeyFingerprint() == "XNJS-wzokyQ2-vjM0QQJgbie5K1rn-niorfnGqyyfNM")
   }
 
+  /// `generateKeypairs` registers the SPKI of the keys it loads: a receiver
+  /// checks the binding over the SPKI it rebuilds from the SEC1 signing key
+  /// (`verifiedSigningKeys`), so that SPKI is the one registered, and
+  /// `getPublicKeyFingerprint` is the registered fingerprint.
+  @Test func generatedKeysAreTheRegisteredOnes() throws {
+    let core = XChatCore()
+    let registration = try core.generateKeypairs().publicKey
+    let signingSEC1 = try #require(try core.signingPublicKey())
+    #expect(
+      try spkiDER(publicKey: signingSEC1)
+        == Base64.decodeStandard(registration.signingPublicKey))
+    #expect(try core.getPublicKeyFingerprint() == registration.publicKeyFingerprint)
+  }
+
   @Test func legacyIdentitySPKICanEncrypt() throws {
     let publicKey = try Base64.decodeStandard(Self.legacyIdentitySPKI)
     let privateKey = TestVectors.bytes("identity_private_b64")

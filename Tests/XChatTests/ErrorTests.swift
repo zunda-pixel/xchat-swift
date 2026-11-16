@@ -112,6 +112,14 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
       + "are none")
 }
 
+/// An empty conversation id is described as the other empty values a
+/// send refuses are.
+@Test func emptyConversationIdIsDescribedAsEmpty() {
+  #expect(
+    XChatError.invalidInput(.emptyConversationId).description
+      == "Invalid conversation_id: must not be empty")
+}
+
 /// A missing conversation key lists the versions there were keys for,
 /// which in decryptEvents include those adopted from the batch's key
 /// changes, so the description does not say they were given. One version
@@ -189,6 +197,7 @@ func debugDescriptionIsTheExpressionThatBuildsTheError(error: XChatError, expect
   .invalidInput(.noContents(.quotedMessage)),
   .invalidInput(.quotedMessageWithoutSequenceId),
   .invalidInput(.conversationIdContainsComma("1,2")),
+  .invalidInput(.emptyConversationId),
   .invalidInput(.quotedMessageNotEmbedded),
   .invalidInput(.quotedMessageInOtherConversation),
   .invalidInput(.emptyMediaHashKey),

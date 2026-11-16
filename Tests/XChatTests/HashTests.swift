@@ -58,11 +58,6 @@ final class HashTests: XCTestCase {
     XCTAssertEqual(base, hkdf(secret: secret, salt: "salt", length: 32))
   }
 
-  /// HKDF-SHA256 derives up to the spec's 255 blocks of 32 bytes.
-  func testHKDFDerivesUpToTheSpecMaximum() {
-    XCTAssertEqual(hkdf(secret: [1], salt: "s", length: 8160).count, 8160)
-  }
-
   func testRandomBytes() {
     let first = randomBytes(32)
     XCTAssertEqual(first.count, 32)

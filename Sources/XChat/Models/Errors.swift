@@ -121,6 +121,12 @@ extension XChatError {
     /// and key changes check it with their other ids and versions, before
     /// what they build.
     case conversationIdContainsComma(String)
+    /// The conversation id a send is given is empty, so it names no
+    /// conversation. Sends check it with their other ids and versions,
+    /// before what they build. `prepareConversationKeyChange` takes an
+    /// empty id as none and derives a one-to-one id from its participants
+    /// (`conversationIdNotDerivable` when it cannot).
+    case emptyConversationId
 
     // Building events
 
@@ -548,10 +554,19 @@ extension XChatError {
   /// `mismatch` and `invalidSigningPublicKey` name the key they were
   /// checked under as `SigningKeyEntry` does: `senderId` is the event's
   /// sender, the entry's `userId`, and `keyVersion` the key version its
-  /// signature names, the entry's `publicKeyVersion`. A caller can replace
-  /// that entry from the error alone: an event that fails is not returned,
-  /// `decryptEvents` gives only its index among events of several senders,
-  /// and no call reads the sender of an event that does not decrypt.
+  /// signature names, the entry's `publicKeyVersion`. They carry both
+  /// because a caller has nothing else to find that entry by: an event
+  /// that fails is not returned, `decryptEvents` gives only its index
+  /// among events of several senders, and no call reads the sender of an
+  /// event that does not decrypt.
+  ///
+  /// `invalidSigningPublicKey` is that entry's fault, but `mismatch` need
+  /// not be. A key change signed at signature version 6 or later signs the
+  /// new conversation key in plaintext too: the one this device decrypts
+  /// from the event, or, when it decrypts none, the one given in
+  /// `conversationKeys` for the event's version. A key given there that is
+  /// not the one signed makes the key change a `mismatch` under the right
+  /// signing key.
   public enum SignatureFailure: Sendable, Hashable {
     /// The signature's version is missing or not an integer.
     case missingSignatureVersion
@@ -561,7 +576,11 @@ extension XChatError {
     case signatureVersionUnsupported(Int32, maximum: Int32)
     /// The signature does not match the payload rebuilt from the event,
     /// under the signing key of `senderId`, the event's sender, at
-    /// `keyVersion`.
+    /// `keyVersion`. For a key change signed at signature version 6 or
+    /// later, that payload includes the conversation key this device
+    /// decrypts from the event, or, when it decrypts none, the one given
+    /// in `conversationKeys` for its version, so a wrong key given there is
+    /// a mismatch too, as the enum's documentation says.
     case mismatch(senderId: String, keyVersion: String)
     /// The signature is not a raw 64-byte `r || s` ECDSA P-256 signature.
     case malformedSignature

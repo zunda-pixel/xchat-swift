@@ -65,8 +65,8 @@ extension XChatCore {
     // conversation key when it is under the same version: checked after, a
     // key of the wrong length would fail as that message's contents not
     // decrypting, a malformed version as no key being given for that
-    // message, and a malformed sender id or a conversation id with a comma
-    // as its conversation not matching.
+    // message, and a malformed sender id, or a conversation id that is
+    // empty or holds a comma, as its conversation not matching.
     try requireSendParameters(
       conversationKey: conversationKey, conversationKeyVersion: conversationKeyVersion,
       senderId: senderId, conversationId: conversationId)
@@ -197,7 +197,7 @@ extension XChatCore {
     guard isKeyVersion(conversationKeyVersion) else {
       throw XChatError.invalidInput(.conversationKeyVersion(conversationKeyVersion))
     }
-    if let conversationId {
+    if let conversationId, !conversationId.isEmpty {
       try requireConversationId(conversationId)
     }
     guard !participants.isEmpty else {
@@ -473,12 +473,12 @@ extension XChatCore {
 
   /// Checks the parameters every send encrypts and signs with: a 32-byte
   /// conversation key, a sender id and a conversation-key version in
-  /// canonical decimal form, and a conversation id without a comma. Every
-  /// send checks them before anything else it is given, so whatever else is
-  /// wrong, each send reports a malformed key, version, sender id or
-  /// conversation id alike; a reply has to, because it opens the message it
-  /// quotes with that key and compares that message's conversation with
-  /// the reply's.
+  /// canonical decimal form, and a conversation id that is not empty and
+  /// has no comma. Every send checks them before anything else it is
+  /// given, so whatever else is wrong, each send reports a malformed key,
+  /// version, sender id or conversation id alike; a reply has to, because
+  /// it opens the message it quotes with that key and compares that
+  /// message's conversation with the reply's.
   private func requireSendParameters(
     conversationKey: [UInt8],
     conversationKeyVersion: String,
@@ -497,14 +497,20 @@ extension XChatCore {
     try requireConversationId(conversationId)
   }
 
-  /// Checks that a conversation id passed to a send or key change can be
-  /// signed: the signed payload joins its components with commas, without
-  /// escaping, and the conversation id is the only component a caller
-  /// passes that is not checked to be digits. Checking it with the other
-  /// ids and versions, rather than when signing, reports it before what
-  /// the call builds: the message a reply quotes, which would not be in
-  /// the reply's conversation, or a key change's participants' keys.
+  /// Checks that a conversation id passed to a send or key change names a
+  /// conversation and can be signed: it is not empty, and it holds no
+  /// comma, since the signed payload joins its components with commas,
+  /// without escaping, and the conversation id is the only component a
+  /// caller passes that is not checked to be digits. Checking it with the
+  /// other ids and versions, rather than when signing, reports it before
+  /// what the call builds: the message a reply quotes, which would not be
+  /// in the reply's conversation, or a key change's participants' keys. A
+  /// key change takes an empty id as none and derives one from its
+  /// participants, so it checks only an id that is not empty.
   private func requireConversationId(_ conversationId: String) throws {
+    guard !conversationId.isEmpty else {
+      throw XChatError.invalidInput(.emptyConversationId)
+    }
     guard !containsComma(conversationId) else {
       throw XChatError.invalidInput(.conversationIdContainsComma(conversationId))
     }
