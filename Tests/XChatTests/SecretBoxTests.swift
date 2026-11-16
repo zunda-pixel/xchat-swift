@@ -1,11 +1,11 @@
-import XCTest
+import Testing
 
 @testable import XChat
 
 /// XSalsa20-Poly1305 against NaCl's own `secretbox.c` / `secretbox.out`
 /// fixed vector (as adapted into the reference crate's test suite), plus
 /// round trips and the message wire format `nonce || tag || ciphertext`.
-final class SecretBoxTests: XCTestCase {
+struct SecretBoxTests {
   private static func hex(_ string: String) -> [UInt8] {
     try! Hex.decode(string)
   }
@@ -41,163 +41,172 @@ final class SecretBoxTests: XCTestCase {
       + "e355a5")
 
   /// Guards the hand-transcribed vectors against dropped characters.
-  func testVectorLengths() {
-    XCTAssertEqual(Self.key.count, 32)
-    XCTAssertEqual(Self.nonce.count, 24)
-    XCTAssertEqual(Self.plaintext.count, 131)
-    XCTAssertEqual(Self.ciphertext.count, 147)
+  @Test func vectorLengths() {
+    #expect(Self.key.count == 32)
+    #expect(Self.nonce.count == 24)
+    #expect(Self.plaintext.count == 131)
+    #expect(Self.ciphertext.count == 147)
   }
 
-  func testNaClSecretboxEncrypt() throws {
+  @Test func naclSecretboxEncrypt() throws {
     let cipher = XSalsa20Poly1305(key: Self.key)
     let (ciphertext, tag) = try cipher.encryptDetached(nonce: Self.nonce, plaintext: Self.plaintext)
-    XCTAssertEqual(tag, Array(Self.ciphertext[0..<16]))
-    XCTAssertEqual(ciphertext, Array(Self.ciphertext[16...]))
+    #expect(tag == Array(Self.ciphertext[0..<16]))
+    #expect(ciphertext == Array(Self.ciphertext[16...]))
   }
 
-  func testNaClSecretboxDecrypt() {
+  @Test func naclSecretboxDecrypt() throws {
     let cipher = XSalsa20Poly1305(key: Self.key)
-    let plaintext = try! cipher.decryptDetached(
+    let plaintext = try cipher.decryptDetached(
       nonce: Self.nonce,
       ciphertext: Array(Self.ciphertext[16...]),
       tag: Array(Self.ciphertext[0..<16]))
-    XCTAssertEqual(plaintext, Self.plaintext)
+    #expect(plaintext == Self.plaintext)
   }
 
   /// The reference crate's `decrypt_modified`: a tweaked ciphertext byte
   /// must fail verification. Every region is covered: ciphertext, tag,
   /// and a keystream-affecting nonce byte.
-  func testTamperRejected() throws {
+  @Test func tamperRejected() throws {
     let cipher = XSalsa20Poly1305(key: Self.key)
 
     var ct = Array(Self.ciphertext[16...])
     ct[0] ^= 0xaa
-    XCTAssertThrowsError(
+    #expect(throws: (any Error).self) {
       try cipher.decryptDetached(
-        nonce: Self.nonce, ciphertext: ct, tag: Array(Self.ciphertext[0..<16])))
+        nonce: Self.nonce, ciphertext: ct, tag: Array(Self.ciphertext[0..<16]))
+    }
 
     var tag = Array(Self.ciphertext[0..<16])
     tag[15] ^= 1
-    XCTAssertThrowsError(
+    #expect(throws: (any Error).self) {
       try cipher.decryptDetached(
-        nonce: Self.nonce, ciphertext: Array(Self.ciphertext[16...]), tag: tag))
+        nonce: Self.nonce, ciphertext: Array(Self.ciphertext[16...]), tag: tag)
+    }
 
     var nonce = Self.nonce
     nonce[0] ^= 1
-    XCTAssertThrowsError(
+    #expect(throws: (any Error).self) {
       try cipher.decryptDetached(
         nonce: nonce, ciphertext: Array(Self.ciphertext[16...]), tag: Array(Self.ciphertext[0..<16])
-      ))
+      )
+    }
 
     // A wrong-length tag is rejected without touching the ciphertext.
-    XCTAssertThrowsError(
+    #expect(throws: (any Error).self) {
       try cipher.decryptDetached(
         nonce: Self.nonce, ciphertext: Array(Self.ciphertext[16...]),
-        tag: Array(Self.ciphertext[0..<15])))
+        tag: Array(Self.ciphertext[0..<15]))
+    }
   }
 
-  func testEmptyPlaintext() throws {
+  @Test func emptyPlaintext() throws {
     let cipher = XSalsa20Poly1305(key: Self.key)
     let (ciphertext, tag) = try cipher.encryptDetached(nonce: Self.nonce, plaintext: [])
-    XCTAssertEqual(ciphertext, [])
-    XCTAssertEqual(tag.count, 16)
-    let plaintext = try! cipher.decryptDetached(nonce: Self.nonce, ciphertext: ciphertext, tag: tag)
-    XCTAssertEqual(plaintext, [])
+    #expect(ciphertext == [])
+    #expect(tag.count == 16)
+    let plaintext = try cipher.decryptDetached(nonce: Self.nonce, ciphertext: ciphertext, tag: tag)
+    #expect(plaintext == [])
   }
 
   /// The NaCl test suite's message-length sweep: every length from 0 to
   /// 1024 round-trips, exercising every Poly1305 padding case.
-  func testRoundTripAllLengths0To1024() throws {
+  @Test(arguments: 0...1024)
+  func roundTripAllLengths(length: Int) throws {
     let key = (0..<32).map { UInt8($0 % 256) }
     let nonce = (0..<24).map { UInt8((32 + $0) % 256) }
     let full = (0..<1024).map { UInt8($0 % 256) }
     let cipher = XSalsa20Poly1305(key: key)
 
-    for length in 0...1024 {
-      let message = Array(full[0..<length])
-      let (ciphertext, tag) = try cipher.encryptDetached(nonce: nonce, plaintext: message)
-      XCTAssertEqual(ciphertext.count, length)
-      let decrypted = try! cipher.decryptDetached(nonce: nonce, ciphertext: ciphertext, tag: tag)
-      XCTAssertEqual(decrypted, message, "length \(length)")
-    }
+    let message = Array(full[0..<length])
+    let (ciphertext, tag) = try cipher.encryptDetached(nonce: nonce, plaintext: message)
+    #expect(ciphertext.count == length)
+    let decrypted = try cipher.decryptDetached(nonce: nonce, ciphertext: ciphertext, tag: tag)
+    #expect(decrypted == message, "length \(length)")
   }
 
   // MARK: message wire format: nonce (24) || tag (16) || ciphertext
 
-  func testMessageWireRoundTrip() {
+  @Test(arguments: [0, 1, 16, 40, 131, 1024])
+  func messageWireRoundTrip(length: Int) throws {
     let key = (0..<32).map { _ in UInt8.random(in: 0...255) }
     let full = (0..<1024).map { UInt8($0 % 256) }
 
-    for length in [0, 1, 16, 40, 131, 1024] {
-      let message = Array(full[0..<length])
-      let box = try! encryptMessage(key: key, plaintext: message)
-      XCTAssertEqual(box.count, 40 + length)
-      XCTAssertEqual(Array(box[0..<24]).count, 24)
-      let decrypted = try! decryptMessage(key: key, ciphertext: box)
-      XCTAssertEqual(decrypted, message, "length \(length)")
-    }
+    let message = Array(full[0..<length])
+    let box = try encryptMessage(key: key, plaintext: message)
+    #expect(box.count == 40 + length)
+    #expect(Array(box[0..<24]).count == 24)
+    let decrypted = try decryptMessage(key: key, ciphertext: box)
+    #expect(decrypted == message, "length \(length)")
   }
 
   /// A fresh random nonce every call: two encryptions of the same message
   /// differ, and each opens with its own bytes.
-  func testMessageWireFreshNonce() {
+  @Test func messageWireFreshNonce() throws {
     let key = (0..<32).map { _ in UInt8.random(in: 0...255) }
     let message = Array("same message".utf8)
 
-    let first = try! encryptMessage(key: key, plaintext: message)
-    let second = try! encryptMessage(key: key, plaintext: message)
-    XCTAssertNotEqual(first, second)
-    XCTAssertEqual(try! decryptMessage(key: key, ciphertext: first), message)
-    XCTAssertEqual(try! decryptMessage(key: key, ciphertext: second), message)
+    let first = try encryptMessage(key: key, plaintext: message)
+    let second = try encryptMessage(key: key, plaintext: message)
+    #expect(first != second)
+    #expect(try decryptMessage(key: key, ciphertext: first) == message)
+    #expect(try decryptMessage(key: key, ciphertext: second) == message)
   }
 
-  func testMessageWireTamperRejected() throws {
+  @Test(arguments: [0, 12, 23, 24, 30, 39, 40, 55])
+  func messageWireTamperRejected(index: Int) throws {
     let key = (0..<32).map { _ in UInt8.random(in: 0...255) }
     let message = Array("message to encrypt".utf8)
-    let box = try! encryptMessage(key: key, plaintext: message)
+    let box = try encryptMessage(key: key, plaintext: message)
 
-    for index in [0, 12, 23, 24, 30, 39, 40, 55] {
-      var tampered = box
-      tampered[index] ^= 0xff
-      XCTAssertThrowsError(try decryptMessage(key: key, ciphertext: tampered), "index \(index)")
+    var tampered = box
+    tampered[index] ^= 0xff
+    #expect(throws: (any Error).self) {
+      try decryptMessage(key: key, ciphertext: tampered)
     }
   }
 
-  func testMessageWireTooShort() throws {
+  @Test(arguments: [0, 1, 24, 39])
+  func messageWireTooShort(length: Int) throws {
     let key = (0..<32).map { _ in UInt8.random(in: 0...255) }
-    for length in [0, 1, 24, 39] {
-      let truncated = [UInt8](repeating: 0, count: length)
-      XCTAssertThrowsError(try decryptMessage(key: key, ciphertext: truncated)) { error in
-        XCTAssertEqual((error as? ContentsError)?.failure, .ciphertextTooShort)
-      }
+    let truncated = [UInt8](repeating: 0, count: length)
+    do {
+      _ = try decryptMessage(key: key, ciphertext: truncated)
+      Issue.record("expected a short ciphertext to be refused")
+    } catch {
+      #expect((error as? ContentsError)?.failure == .ciphertextTooShort)
     }
   }
 
-  func testMessageWireInvalidKeyLength() throws {
-    let shortKey = [UInt8](repeating: 1, count: 16)
-    let longKey = [UInt8](repeating: 1, count: 33)
+  @Test(arguments: [16, 33])
+  func messageWireInvalidKeyLength(length: Int) throws {
+    let key = [UInt8](repeating: 1, count: length)
     let message = Array("hi".utf8)
-    let box = try! encryptMessage(
+    let box = try encryptMessage(
       key: (0..<32).map { _ in UInt8.random(in: 0...255) }, plaintext: message)
 
-    for key in [shortKey, longKey] {
-      XCTAssertThrowsError(try encryptMessage(key: key, plaintext: message)) { error in
-        XCTAssertEqual(error as? XChatError, .invalidInput(.conversationKeyLength(key.count)))
-      }
-      XCTAssertThrowsError(try decryptMessage(key: key, ciphertext: box)) { error in
-        XCTAssertEqual((error as? ContentsError)?.failure, .keyLength(key.count))
-      }
+    #expect(throws: XChatError.invalidInput(.conversationKeyLength(length))) {
+      try encryptMessage(key: key, plaintext: message)
+    }
+    do {
+      _ = try decryptMessage(key: key, ciphertext: box)
+      Issue.record("expected a key of \(length) bytes to be refused")
+    } catch {
+      #expect((error as? ContentsError)?.failure == .keyLength(length))
     }
   }
 
-  func testMessageWireWrongKey() throws {
+  @Test func messageWireWrongKey() throws {
     let key = (0..<32).map { _ in UInt8.random(in: 0...255) }
     let otherKey = (0..<32).map { _ in UInt8.random(in: 0...255) }
     let message = Array("message to encrypt".utf8)
-    let box = try! encryptMessage(key: key, plaintext: message)
+    let box = try encryptMessage(key: key, plaintext: message)
 
-    XCTAssertThrowsError(try decryptMessage(key: otherKey, ciphertext: box)) { error in
-      XCTAssertEqual((error as? ContentsError)?.failure, .authenticationFailed)
+    do {
+      _ = try decryptMessage(key: otherKey, ciphertext: box)
+      Issue.record("expected the wrong key to be refused")
+    } catch {
+      #expect((error as? ContentsError)?.failure == .authenticationFailed)
     }
   }
 }

@@ -1,11 +1,11 @@
-import XCTest
+import Testing
 
 @testable import XChat
 
 /// The signature payload layouts and verification, against signatures the
 /// reference produced: a v7 message, a v10 (per-message-key) message, and a
 /// v7 conversation-key change.
-final class EventSignatureTests: XCTestCase {
+struct EventSignatureTests {
   private static let signingKey = SigningKey(
     publicKeyVersion: TestVectors.string("event_signing_key_version"),
     publicKey: TestVectors.string("signing_public_b64"))
@@ -13,84 +13,87 @@ final class EventSignatureTests: XCTestCase {
   private func decodeEvent(_ field: String) throws -> MessageEvent {
     var reader = ThriftReader(TestVectors.bytes(field))
     let event = try MessageEvent.read(&reader)
-    XCTAssertTrue(reader.isAtEnd)
+    #expect(reader.isAtEnd)
     return event
   }
 
   private func detail(of event: MessageEvent) throws -> MessageEventDetail {
-    try XCTUnwrap(event.detail)
+    try #require(event.detail)
   }
 
   // MARK: Vector signatures
 
-  func testVectorConversationKeyMessageSignatureVerifies() throws {
+  @Test func vectorConversationKeyMessageSignatureVerifies() throws {
     let event = try decodeEvent("event_message_b64")
-    XCTAssertEqual(signatureVersion(of: event), 7)
-    XCTAssertEqual(
+    #expect(signatureVersion(of: event) == 7)
+    #expect(
       checkEventSignature(
-        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
-      .verified)
+        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey])
+        == .verified)
   }
 
   /// The v1 message signs at v10, covering `contents_encryption_version`.
-  func testVectorMessageKeySignatureVerifies() throws {
+  @Test func vectorMessageKeySignatureVerifies() throws {
     let event = try decodeEvent("event_message_key_b64")
-    XCTAssertEqual(signatureVersion(of: event), 10)
-    XCTAssertEqual(
+    #expect(signatureVersion(of: event) == 10)
+    #expect(
       checkEventSignature(
-        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
-      .verified)
+        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey])
+        == .verified)
   }
 
   /// A key change from v6 on signs the plaintext conversation key, so the
   /// caller (or the SDK) supplies its unpadded base64.
-  func testVectorKeyChangeSignatureVerifies() throws {
+  @Test func vectorKeyChangeSignatureVerifies() throws {
     let event = try decodeEvent("event_key_change_b64")
     let keyB64 = Base64.encodeStandard(TestVectors.bytes("conversation_key_b64"))
-    XCTAssertEqual(
+    #expect(
       checkEventSignature(
         event: event, detail: try detail(of: event), signingKeys: [Self.signingKey],
-        plaintextConversationKeyB64: keyB64),
-      .verified)
+        plaintextConversationKeyB64: keyB64)
+        == .verified)
 
     // Without the key the payload cannot be rebuilt.
-    XCTAssertEqual(
+    #expect(
       checkEventSignature(
-        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
-      .unverifiable)
+        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey])
+        == .unverifiable)
   }
 
-  func testWrongKeyFails() throws {
+  @Test func wrongKeyFails() throws {
     let event = try decodeEvent("event_message_b64")
     let otherKey = SigningKey(
       publicKeyVersion: Self.signingKey.publicKeyVersion,
       publicKey: Base64.encodeStandard(generateKeyPair().publicKey))
-    guard
-      case .failed(.mismatch(let senderId, let keyVersion)) = checkEventSignature(
+    let mismatch: (senderId: String, keyVersion: String)? =
+      switch checkEventSignature(
         event: event, detail: try detail(of: event), signingKeys: [otherKey])
-    else {
-      return XCTFail("expected a signature mismatch")
-    }
-    XCTAssertEqual(senderId, event.senderId)
-    XCTAssertEqual(keyVersion, Self.signingKey.publicKeyVersion)
+      {
+      case .failed(.mismatch(let senderId, let keyVersion)): (senderId, keyVersion)
+      default: nil
+      }
+    let observed = try #require(mismatch, "expected a signature mismatch")
+    #expect(observed.senderId == event.senderId)
+    #expect(observed.keyVersion == Self.signingKey.publicKeyVersion)
 
     // A key known under a different version leaves the event unverifiable.
     let unknownVersion = SigningKey(
       publicKeyVersion: "99", publicKey: Self.signingKey.publicKey)
-    XCTAssertEqual(
+    #expect(
       checkEventSignature(
-        event: event, detail: try detail(of: event), signingKeys: [unknownVersion]),
-      .unverifiable)
+        event: event, detail: try detail(of: event), signingKeys: [unknownVersion])
+        == .unverifiable)
   }
 
-  func testTamperedEventFails() throws {
+  @Test func tamperedEventFails() throws {
     var event = try decodeEvent("event_message_b64")
     event.messageId = "2c2a1d32-0000-0000-0000-000000000000"
     guard
       case .failed(.mismatch) = checkEventSignature(
         event: event, detail: try detail(of: event), signingKeys: [Self.signingKey])
     else {
-      return XCTFail("expected a signature mismatch")
+      Issue.record("expected a signature mismatch")
+      return
     }
   }
 
@@ -126,45 +129,45 @@ final class EventSignatureTests: XCTestCase {
     return event
   }
 
-  func testMessagePayloadLayouts() throws {
+  @Test func messagePayloadLayouts() throws {
     // v7: the contents' unpadded base64 and the integer key version.
     let v7 = messageEvent(signatureVersion: "7")
-    XCTAssertEqual(
-      eventSignaturePayload(event: v7, detail: try detail(of: v7)),
-      "MessageCreateEvent,m,s,c,9,\(Base64.encodeStandard([1]))")
+    #expect(
+      eventSignaturePayload(event: v7, detail: try detail(of: v7))
+        == "MessageCreateEvent,m,s,c,9,\(Base64.encodeStandard([1]))")
 
     // v10 adds contents_encryption_version, "null" when unset, and both
     // v9 and v10 bind signature_version into the payload.
     let v10 = messageEvent(contentsVersion: 1, signatureVersion: "10")
-    XCTAssertEqual(
-      eventSignaturePayload(event: v10, detail: try detail(of: v10)),
-      "MessageCreateEvent,m,s,c,9,\(Base64.encodeStandard([1])),1,signature_version=10")
+    #expect(
+      eventSignaturePayload(event: v10, detail: try detail(of: v10))
+        == "MessageCreateEvent,m,s,c,9,\(Base64.encodeStandard([1])),1,signature_version=10")
     let v10Unset = messageEvent(signatureVersion: "10")
-    XCTAssertEqual(
-      eventSignaturePayload(event: v10Unset, detail: try detail(of: v10Unset)),
-      "MessageCreateEvent,m,s,c,9,\(Base64.encodeStandard([1])),null,signature_version=10")
+    #expect(
+      eventSignaturePayload(event: v10Unset, detail: try detail(of: v10Unset))
+        == "MessageCreateEvent,m,s,c,9,\(Base64.encodeStandard([1])),null,signature_version=10")
 
     // v9 binds the version but does not cover contents_encryption_version.
     let v9 = messageEvent(contentsVersion: 1, signatureVersion: "9")
-    XCTAssertEqual(
-      eventSignaturePayload(event: v9, detail: try detail(of: v9)),
-      "MessageCreateEvent,m,s,c,9,\(Base64.encodeStandard([1])),signature_version=9")
+    #expect(
+      eventSignaturePayload(event: v9, detail: try detail(of: v9))
+        == "MessageCreateEvent,m,s,c,9,\(Base64.encodeStandard([1])),signature_version=9")
 
     // An absent conversation id drops the component.
     let noConversation = messageEvent(conversationId: nil, signatureVersion: "7")
-    XCTAssertEqual(
-      eventSignaturePayload(event: noConversation, detail: try detail(of: noConversation)),
-      "MessageCreateEvent,m,s,9,\(Base64.encodeStandard([1]))")
+    #expect(
+      eventSignaturePayload(event: noConversation, detail: try detail(of: noConversation))
+        == "MessageCreateEvent,m,s,9,\(Base64.encodeStandard([1]))")
 
     // Below the floor there is no verifiable layout.
     let v1 = messageEvent(signatureVersion: "1")
-    XCTAssertNil(eventSignaturePayload(event: v1, detail: try detail(of: v1)))
+    #expect(eventSignaturePayload(event: v1, detail: try detail(of: v1)) == nil)
     // A missing version has none either.
     let unversioned = messageEvent(signatureVersion: nil)
-    XCTAssertNil(eventSignaturePayload(event: unversioned, detail: try detail(of: unversioned)))
+    #expect(eventSignaturePayload(event: unversioned, detail: try detail(of: unversioned)) == nil)
   }
 
-  func testKeyChangePayloadLayouts() throws {
+  @Test func keyChangePayloadLayouts() throws {
     func keyChange(
       version: String, participants: [ConversationParticipantKey]
     ) -> MessageEvent {
@@ -190,10 +193,10 @@ final class EventSignatureTests: XCTestCase {
         ConversationParticipantKey(
           userId: "u1", encryptedConversationKey: "e1", publicKeyVersion: "1")
       ])
-    XCTAssertEqual(
+    #expect(
       eventSignaturePayload(
-        event: modern, detail: try detail(of: modern), plaintextConversationKeyB64: "AAAA"),
-      "ConversationKeyChangeEvent,m,s,c,1001,AAAA")
+        event: modern, detail: try detail(of: modern), plaintextConversationKeyB64: "AAAA")
+        == "ConversationKeyChangeEvent,m,s,c,1001,AAAA")
 
     // Pre-v6: the participant triplets, fields an entry lacks omitted.
     let legacy = keyChange(
@@ -204,9 +207,9 @@ final class EventSignatureTests: XCTestCase {
         ConversationParticipantKey(
           userId: "u2", encryptedConversationKey: nil, publicKeyVersion: nil),
       ])
-    XCTAssertEqual(
-      eventSignaturePayload(event: legacy, detail: try detail(of: legacy)),
-      "ConversationKeyChangeEvent,m,s,c,1001,u1,e1,1,u2")
+    #expect(
+      eventSignaturePayload(event: legacy, detail: try detail(of: legacy))
+        == "ConversationKeyChangeEvent,m,s,c,1001,u1,e1,1,u2")
 
     // A non-integer key version has no payload.
     var notAnInteger = modern
@@ -215,11 +218,11 @@ final class EventSignatureTests: XCTestCase {
         conversationKeyVersion: "later",
         conversationParticipantKeys: nil,
         forKeyRotation: nil))
-    XCTAssertNil(
-      eventSignaturePayload(event: notAnInteger, detail: try detail(of: notAnInteger)))
+    #expect(
+      eventSignaturePayload(event: notAnInteger, detail: try detail(of: notAnInteger)) == nil)
   }
 
-  func testDeleteAndUnmodelledPayloads() throws {
+  @Test func deleteAndUnmodelledPayloads() throws {
     var deletion = MessageEvent()
     deletion.messageId = "m"
     deletion.senderId = "s"
@@ -230,67 +233,67 @@ final class EventSignatureTests: XCTestCase {
     deletion.detail = .messageDelete(
       MessageDeleteEvent(sequenceIds: ["5", "6"], deleteMessageAction: 2))
 
-    XCTAssertEqual(
-      eventSignaturePayload(event: deletion, detail: try detail(of: deletion)),
-      "MessageDeleteEvent,m,s,c,2,5,6")
+    #expect(
+      eventSignaturePayload(event: deletion, detail: try detail(of: deletion))
+        == "MessageDeleteEvent,m,s,c,2,5,6")
 
     var conversationDeletion = deletion
     conversationDeletion.detail = .conversationDelete(
       ConversationDeleteEvent(conversationId: "c"))
-    XCTAssertEqual(
+    #expect(
       eventSignaturePayload(
-        event: conversationDeletion, detail: try detail(of: conversationDeletion)),
-      "ConversationDeleteEvent,m,s,c")
+        event: conversationDeletion, detail: try detail(of: conversationDeletion))
+        == "ConversationDeleteEvent,m,s,c")
 
     // Typing and unmodelled variants carry no rebuilt payload.
     var typing = deletion
     typing.detail = .messageTyping(MessageTypingEvent(conversationId: "c"))
-    XCTAssertNil(eventSignaturePayload(event: typing, detail: try detail(of: typing)))
+    #expect(eventSignaturePayload(event: typing, detail: try detail(of: typing)) == nil)
     var unsupported = deletion
     unsupported.detail = .unsupported(fieldId: 12)
-    XCTAssertNil(
-      eventSignaturePayload(event: unsupported, detail: try detail(of: unsupported)))
+    #expect(
+      eventSignaturePayload(event: unsupported, detail: try detail(of: unsupported)) == nil)
   }
 
   /// A comma in any component makes the payload ambiguous, so no payload
   /// is built, and a received event with one is unverifiable. Sends refuse
   /// a conversation id with a comma, the only component a caller passes
   /// that can hold one, before signing (`conversationIdContainsComma`).
-  func testCommaInComponentIsRefused() throws {
+  @Test func commaInComponentIsRefused() throws {
     let event = messageEvent(messageId: "m,1", signatureVersion: "7")
-    XCTAssertNil(eventSignaturePayload(event: event, detail: try detail(of: event)))
-    XCTAssertEqual(
+    #expect(eventSignaturePayload(event: event, detail: try detail(of: event)) == nil)
+    #expect(
       checkEventSignature(
-        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey]),
-      .unverifiable)
+        event: event, detail: try detail(of: event), signingKeys: [Self.signingKey])
+        == .unverifiable)
   }
 
   // MARK: Version bounds
 
-  func testVersionBounds() throws {
+  @Test func versionBounds() throws {
     let tooOld = messageEvent(signatureVersion: "1")
-    XCTAssertEqual(
+    #expect(
       checkEventSignature(
-        event: tooOld, detail: try detail(of: tooOld), signingKeys: [Self.signingKey]),
-      .failed(.signatureVersionTooOld(1, minimum: 2)))
+        event: tooOld, detail: try detail(of: tooOld), signingKeys: [Self.signingKey])
+        == .failed(.signatureVersionTooOld(1, minimum: 2)))
 
     let tooNew = messageEvent(signatureVersion: "12")
-    XCTAssertEqual(
+    #expect(
       checkEventSignature(
-        event: tooNew, detail: try detail(of: tooNew), signingKeys: [Self.signingKey]),
-      .failed(.signatureVersionUnsupported(12, maximum: 11)))
+        event: tooNew, detail: try detail(of: tooNew), signingKeys: [Self.signingKey])
+        == .failed(.signatureVersionUnsupported(12, maximum: 11)))
 
     let unversioned = messageEvent(signatureVersion: nil)
-    XCTAssertEqual(
+    #expect(
       checkEventSignature(
         event: unversioned, detail: try detail(of: unversioned),
-        signingKeys: [Self.signingKey]),
-      .failed(.missingSignatureVersion))
+        signingKeys: [Self.signingKey])
+        == .failed(.missingSignatureVersion))
   }
 
   // MARK: Signing round trips
 
-  func testMessageSignAndVerifyRoundTrip() throws {
+  @Test func messageSignAndVerifyRoundTrip() throws {
     let keypair = generateKeyPair()
     let signingKey = SigningKey(
       publicKeyVersion: "5", publicKey: Base64.encodeStandard(keypair.publicKey))
@@ -313,23 +316,23 @@ final class EventSignatureTests: XCTestCase {
       conversationId: "s:t",
       signatureVersion: 10,
       detail: detail)
-    XCTAssertEqual(signature.signatureVersion, "10")
-    XCTAssertEqual(signature.publicKeyVersion, "5")
-    XCTAssertEqual(signature.signingPublicKey, Base64.encodeStandard(keypair.publicKey))
+    #expect(signature.signatureVersion == "10")
+    #expect(signature.publicKeyVersion == "5")
+    #expect(signature.signingPublicKey == Base64.encodeStandard(keypair.publicKey))
 
     var event = MessageEvent()
     event.messageId = "m"
     event.senderId = "s"
     event.conversationId = "s:t"
     event.messageEventSignature = signature
-    XCTAssertEqual(
-      checkEventSignature(event: event, detail: detail, signingKeys: [signingKey]),
-      .verified)
+    #expect(
+      checkEventSignature(event: event, detail: detail, signingKeys: [signingKey])
+        == .verified)
     // The signed bytes are exactly the ones a verifier rebuilds.
-    XCTAssertEqual(payload, eventSignaturePayload(event: event, detail: detail))
+    #expect(payload == eventSignaturePayload(event: event, detail: detail))
   }
 
-  func testKeyChangeSignAndVerifyRoundTrip() throws {
+  @Test func keyChangeSignAndVerifyRoundTrip() throws {
     let keypair = generateKeyPair()
     let signingKey = SigningKey(
       publicKeyVersion: "2", publicKey: Base64.encodeStandard(keypair.publicKey))
@@ -357,11 +360,11 @@ final class EventSignatureTests: XCTestCase {
     event.senderId = "s"
     event.conversationId = "s:t"
     event.messageEventSignature = signature
-    XCTAssertEqual(
+    #expect(
       checkEventSignature(
         event: event, detail: detail, signingKeys: [signingKey],
-        plaintextConversationKeyB64: keyB64),
-      .verified)
+        plaintextConversationKeyB64: keyB64)
+        == .verified)
     // With the wrong key the payload differs and verification fails.
     let wrongKey = Base64.encodeStandard([UInt8](repeating: 7, count: 32))
     guard
@@ -369,7 +372,8 @@ final class EventSignatureTests: XCTestCase {
         event: event, detail: detail, signingKeys: [signingKey],
         plaintextConversationKeyB64: wrongKey)
     else {
-      return XCTFail("expected a signature mismatch")
+      Issue.record("expected a signature mismatch")
+      return
     }
   }
 }

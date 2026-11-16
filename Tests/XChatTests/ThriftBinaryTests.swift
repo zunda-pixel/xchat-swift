@@ -1,66 +1,66 @@
-import XCTest
+import Testing
 
 @testable import XChat
 
 /// The Thrift binary protocol: exact encodings, bounds against hostile
 /// input, skipping unmodelled values, and decoding the cross-binding
 /// vectors' real events.
-final class ThriftBinaryTests: XCTestCase {
+struct ThriftBinaryTests {
   /// Asserts the reader throws `failure`.
   private func assertThrows<T>(
     _ failure: XChatError.ThriftFailure,
-    _ message: @autoclosure () -> String = "",
-    file: StaticString = #filePath,
-    line: UInt = #line,
     _ body: () throws -> T
   ) {
-    XCTAssertThrowsError(try body(), message(), file: file, line: line) { error in
-      XCTAssertEqual((error as? ThriftError)?.failure, failure, file: file, line: line)
+    do {
+      _ = try body()
+      Issue.record("expected \(failure), but no error was thrown")
+    } catch {
+      #expect((error as? ThriftError)?.failure == failure)
     }
   }
 
   // MARK: Exact encodings
 
   /// The reference implementation's own expectations for field headers.
-  func testFieldHeaderEncodings() {
+  @Test func fieldHeaderEncodings() {
     var writer = ThriftWriter()
     writer.writeFieldBegin(id: 22, type: .binary)
-    XCTAssertEqual(writer.data, [0x0B, 0x00, 0x16])
+    #expect(writer.data == [0x0B, 0x00, 0x16])
 
     writer = ThriftWriter()
     writer.writeFieldBegin(id: 102, type: .bool)
     writer.writeBool(true)
-    XCTAssertEqual(writer.data, [0x02, 0x00, 0x66, 0x01])
+    #expect(writer.data == [0x02, 0x00, 0x66, 0x01])
 
     writer = ThriftWriter()
     writer.writeFieldStop()
-    XCTAssertEqual(writer.data, [0x00])
+    #expect(writer.data == [0x00])
   }
 
   /// Container headers: element type, then a big-endian count.
-  func testContainerHeaderEncodings() {
+  @Test func containerHeaderEncodings() {
     var writer = ThriftWriter()
     writer.writeListBegin(elementType: .bool, count: 5)
-    XCTAssertEqual(writer.data, [0x02, 0x00, 0x00, 0x00, 0x05])
+    #expect(writer.data == [0x02, 0x00, 0x00, 0x00, 0x05])
 
     writer = ThriftWriter()
     writer.writeSetBegin(elementType: .i16, count: 7)
-    XCTAssertEqual(writer.data, [0x06, 0x00, 0x00, 0x00, 0x07])
+    #expect(writer.data == [0x06, 0x00, 0x00, 0x00, 0x07])
 
     writer = ThriftWriter()
     writer.writeMapBegin(keyType: .i64, valueType: .structure, count: 32)
-    XCTAssertEqual(writer.data, [0x0A, 0x0C, 0x00, 0x00, 0x00, 0x20])
+    #expect(writer.data == [0x0A, 0x0C, 0x00, 0x00, 0x00, 0x20])
   }
 
-  func testStringEncoding() {
+  @Test func stringEncoding() {
     var writer = ThriftWriter()
     writer.writeString("hello")
-    XCTAssertEqual(writer.data, [0x00, 0x00, 0x00, 0x05] + Array("hello".utf8))
+    #expect(writer.data == [0x00, 0x00, 0x00, 0x05] + Array("hello".utf8))
   }
 
   // MARK: Round trips
 
-  func testPrimitiveRoundTrips() throws {
+  @Test func primitiveRoundTrips() throws {
     var writer = ThriftWriter()
     writer.writeByte(-7)
     writer.writeBool(true)
@@ -76,22 +76,22 @@ final class ThriftBinaryTests: XCTestCase {
     writer.writeBinary([0, 1, 2, 255])
 
     var reader = ThriftReader(writer.data)
-    XCTAssertEqual(try reader.readByte(), -7)
-    XCTAssertTrue(try reader.readBool())
-    XCTAssertFalse(try reader.readBool())
-    XCTAssertEqual(try reader.readI16(), Int16.min)
-    XCTAssertEqual(try reader.readI16(), Int16.max)
-    XCTAssertEqual(try reader.readI32(), Int32.min)
-    XCTAssertEqual(try reader.readI32(), Int32.max)
-    XCTAssertEqual(try reader.readI64(), Int64.min)
-    XCTAssertEqual(try reader.readI64(), Int64.max)
-    XCTAssertEqual(try reader.readDouble(), 3.141592653589793)
-    XCTAssertEqual(try reader.readString(), "héllo — 日本")
-    XCTAssertEqual(try reader.readBinary(), [0, 1, 2, 255])
-    XCTAssertTrue(reader.isAtEnd)
+    #expect(try reader.readByte() == -7)
+    #expect(try reader.readBool())
+    #expect(try !reader.readBool())
+    #expect(try reader.readI16() == Int16.min)
+    #expect(try reader.readI16() == Int16.max)
+    #expect(try reader.readI32() == Int32.min)
+    #expect(try reader.readI32() == Int32.max)
+    #expect(try reader.readI64() == Int64.min)
+    #expect(try reader.readI64() == Int64.max)
+    #expect(try reader.readDouble() == 3.141592653589793)
+    #expect(try reader.readString() == "héllo — 日本")
+    #expect(try reader.readBinary() == [0, 1, 2, 255])
+    #expect(reader.isAtEnd)
   }
 
-  func testStructRoundTripAndSkip() throws {
+  @Test func structRoundTripAndSkip() throws {
     // struct { 1: string "a", 2: list<i32> [1, 2], 3: map<i64, string> {5: "x"},
     //          4: struct { 1: bool true } }
     var writer = ThriftWriter()
@@ -113,47 +113,47 @@ final class ThriftBinaryTests: XCTestCase {
     let bytes = writer.data
 
     var reader = ThriftReader(bytes)
-    XCTAssertEqual(try reader.readFieldBegin().id, 1)
-    XCTAssertEqual(try reader.readString(), "a")
-    XCTAssertEqual(try reader.readFieldBegin().id, 2)
+    #expect(try reader.readFieldBegin().id == 1)
+    #expect(try reader.readString() == "a")
+    #expect(try reader.readFieldBegin().id == 2)
     let list = try reader.readListBegin()
-    XCTAssertEqual(list.elementType, .i32)
-    XCTAssertEqual(list.count, 2)
-    XCTAssertEqual(try reader.readI32(), 1)
-    XCTAssertEqual(try reader.readI32(), 2)
-    XCTAssertEqual(try reader.readFieldBegin().id, 3)
+    #expect(list.elementType == .i32)
+    #expect(list.count == 2)
+    #expect(try reader.readI32() == 1)
+    #expect(try reader.readI32() == 2)
+    #expect(try reader.readFieldBegin().id == 3)
     let map = try reader.readMapBegin()
-    XCTAssertEqual(map.keyType, .i64)
-    XCTAssertEqual(map.valueType, .binary)
-    XCTAssertEqual(map.count, 1)
-    XCTAssertEqual(try reader.readI64(), 5)
-    XCTAssertEqual(try reader.readString(), "x")
-    XCTAssertEqual(try reader.readFieldBegin().id, 4)
-    XCTAssertEqual(try reader.readFieldBegin().id, 1)
-    XCTAssertTrue(try reader.readBool())
-    XCTAssertEqual(try reader.readFieldBegin().type, .stop)
-    XCTAssertEqual(try reader.readFieldBegin().type, .stop)
-    XCTAssertTrue(reader.isAtEnd)
+    #expect(map.keyType == .i64)
+    #expect(map.valueType == .binary)
+    #expect(map.count == 1)
+    #expect(try reader.readI64() == 5)
+    #expect(try reader.readString() == "x")
+    #expect(try reader.readFieldBegin().id == 4)
+    #expect(try reader.readFieldBegin().id == 1)
+    #expect(try reader.readBool())
+    #expect(try reader.readFieldBegin().type == .stop)
+    #expect(try reader.readFieldBegin().type == .stop)
+    #expect(reader.isAtEnd)
 
     // The whole struct also skips in one call.
     var skipper = ThriftReader(bytes)
     try skipper.skip(.structure)
-    XCTAssertTrue(skipper.isAtEnd)
+    #expect(skipper.isAtEnd)
   }
 
   // MARK: Bounds
 
-  func testUnknownFieldTypeRejected() {
+  @Test func unknownFieldTypeRejected() {
     var reader = ThriftReader([0x05])
     assertThrows(.unknownType(0x05)) { try reader.readFieldBegin() }
     var listReader = ThriftReader([0x05, 0x00, 0x00, 0x00, 0x00])
     assertThrows(.unknownType(0x05)) { try listReader.readListBegin() }
   }
 
-  func testTruncatedInputRejected() {
+  @Test func truncatedInputRejected() {
     for bytes: [UInt8] in [[], [0x0B], [0x0B, 0x00], [0x06, 0x00]] {
       var reader = ThriftReader(bytes)
-      assertThrows(.unexpectedEnd, "\(bytes)") { try reader.readFieldBegin() }
+      assertThrows(.unexpectedEnd) { try reader.readFieldBegin() }
     }
     // A field header can be complete while its value is not.
     var reader = ThriftReader([0x06, 0x00, 0x01])
@@ -161,10 +161,10 @@ final class ThriftBinaryTests: XCTestCase {
     assertThrows(.unexpectedEnd) { try reader.readI16() }
     var stringReader = ThriftReader([0x00, 0x00, 0x00, 0x05, 0x61])
     assertThrows(.unexpectedEnd) { try stringReader.readString() }
-    XCTAssertFalse(stringReader.isAtEnd)
+    #expect(!stringReader.isAtEnd)
   }
 
-  func testNegativeAndOversizedLengthsRejected() {
+  @Test func negativeAndOversizedLengthsRejected() {
     // Negative string length.
     var negative = ThriftReader([0xFF, 0xFF, 0xFF, 0xFF])
     assertThrows(.negativeSize(.binary, -1)) { try negative.readBinary() }
@@ -189,7 +189,7 @@ final class ThriftBinaryTests: XCTestCase {
 
   /// The cumulative cap is enforced across containers, so nested
   /// containers cannot multiply the per-container cap.
-  func testCumulativeContainerCap() throws {
+  @Test func cumulativeContainerCap() throws {
     var headers: [UInt8] = []
     for _ in 0..<11 {
       headers += [0x08, 0x00, 0x00, 0x27, 0x10]  // list<i32> of 10_000
@@ -204,7 +204,7 @@ final class ThriftBinaryTests: XCTestCase {
   }
 
   /// Skipping refuses to recurse without bound.
-  func testSkipDepthLimit() throws {
+  @Test func skipDepthLimit() throws {
     func nestedStructs(_ depth: Int) -> [UInt8] {
       var bytes: [UInt8] = []
       for _ in 0..<depth {
@@ -217,7 +217,7 @@ final class ThriftBinaryTests: XCTestCase {
 
     var shallow = ThriftReader(nestedStructs(64))
     try shallow.skip(.structure)
-    XCTAssertTrue(shallow.isAtEnd)
+    #expect(shallow.isAtEnd)
 
     var deep = ThriftReader(nestedStructs(70))
     assertThrows(.nestingTooDeep(maximum: 64)) { try deep.skip(.structure) }
@@ -288,52 +288,51 @@ final class ThriftBinaryTests: XCTestCase {
       }
       field = try reader.readFieldBegin()
     }
-    XCTAssertTrue(reader.isAtEnd)
+    #expect(reader.isAtEnd)
     return envelope
   }
 
-  func testVectorMessageEventEnvelope() throws {
+  @Test func vectorMessageEventEnvelope() throws {
     let envelope = try decodeEnvelope(TestVectors.bytes("event_message_b64"))
-    XCTAssertEqual(envelope.sequenceId, "1")
-    XCTAssertEqual(envelope.messageId?.count, 36)
-    XCTAssertEqual(envelope.senderId, TestVectors.string("event_sender_id"))
-    XCTAssertEqual(envelope.conversationId, TestVectors.string("event_conversation_id"))
-    XCTAssertEqual(envelope.detailField, ThriftField(id: 1, type: .structure))
-    let signature = try XCTUnwrap(envelope.signature)
-    XCTAssertNotNil(signature.value)
-    XCTAssertNotNil(signature.publicKeyVersion)
-    XCTAssertNotNil(signature.signatureVersion)
+    #expect(envelope.sequenceId == "1")
+    #expect(envelope.messageId?.count == 36)
+    #expect(envelope.senderId == TestVectors.string("event_sender_id"))
+    #expect(envelope.conversationId == TestVectors.string("event_conversation_id"))
+    #expect(envelope.detailField == ThriftField(id: 1, type: .structure))
+    let signature = try #require(envelope.signature)
+    #expect(signature.value != nil)
+    #expect(signature.publicKeyVersion != nil)
+    #expect(signature.signatureVersion != nil)
   }
 
-  func testVectorUnencryptedEventEnvelope() throws {
+  @Test func vectorUnencryptedEventEnvelope() throws {
     let envelope = try decodeEnvelope(TestVectors.bytes("event_unencrypted_b64"))
-    XCTAssertEqual(envelope.senderId, TestVectors.string("event_sender_id"))
-    XCTAssertEqual(envelope.messageId, "plain-msg-1")
+    #expect(envelope.senderId == TestVectors.string("event_sender_id"))
+    #expect(envelope.messageId == "plain-msg-1")
   }
 
   /// The key-change event's detail is the conversation-key-change variant.
-  func testVectorKeyChangeEventEnvelope() throws {
+  @Test func vectorKeyChangeEventEnvelope() throws {
     let envelope = try decodeEnvelope(TestVectors.bytes("event_key_change_b64"))
-    XCTAssertEqual(envelope.senderId, TestVectors.string("event_sender_id"))
-    XCTAssertEqual(envelope.messageId, "kc-msg-1")
-    XCTAssertEqual(envelope.detailField, ThriftField(id: 3, type: .structure))
+    #expect(envelope.senderId == TestVectors.string("event_sender_id"))
+    #expect(envelope.messageId == "kc-msg-1")
+    #expect(envelope.detailField == ThriftField(id: 3, type: .structure))
   }
 
-  func testVectorFailureEventEnvelope() throws {
+  @Test func vectorFailureEventEnvelope() throws {
     let envelope = try decodeEnvelope(TestVectors.bytes("event_failure_b64"))
-    XCTAssertEqual(envelope.messageId, "failure-msg-1")
-    XCTAssertEqual(envelope.detailField, ThriftField(id: 5, type: .structure))
+    #expect(envelope.messageId == "failure-msg-1")
+    #expect(envelope.detailField == ThriftField(id: 5, type: .structure))
   }
 
   /// The garbage vector is not decodable base64; strict decoding rejects it
   /// before any Thrift parsing. Arbitrary bytes are rejected as unknown
   /// field types.
-  func testGarbageEventRejected() {
-    XCTAssertThrowsError(
+  @Test func garbageEventRejected() {
+    #expect(
+      throws: XChatError.parse(.base64(.invalidByte(UInt8(ascii: "!"))))
+    ) {
       try Base64.decodeStandard(TestVectors.string("event_garbage_b64"))
-    ) { error in
-      XCTAssertEqual(
-        error as? XChatError, .parse(.base64(.invalidByte(UInt8(ascii: "!")))))
     }
 
     var reader = ThriftReader([0x9E, 0x8B, 0x5A, 0x9D, 0xEB, 0xDE, 0x9E])
@@ -344,7 +343,7 @@ final class ThriftBinaryTests: XCTestCase {
   /// participant key, and ECIES-decrypt it with the vector's identity key.
   /// Every layer — Thrift, base64, ECDH, KDF2, AES-GCM with a 16-byte IV —
   /// must agree with the reference.
-  func testVectorKeyChangeDecryptsConversationKey() throws {
+  @Test func vectorKeyChangeDecryptsConversationKey() throws {
     let bytes = TestVectors.bytes("event_key_change_b64")
     var reader = ThriftReader(bytes)
 
@@ -394,10 +393,10 @@ final class ThriftBinaryTests: XCTestCase {
       field = try reader.readFieldBegin()
     }
 
-    let encrypted = try XCTUnwrap(participantKey)
-    XCTAssertEqual(participantVersion, TestVectors.string("event_recipient_key_version"))
+    let encrypted = try #require(participantKey)
+    #expect(participantVersion == TestVectors.string("event_recipient_key_version"))
     let conversationKey = try decryptWithPrivateKey(
       privateKey: TestVectors.bytes("identity_private_b64"), data: encrypted)
-    XCTAssertEqual(conversationKey, TestVectors.bytes("conversation_key_b64"))
+    #expect(conversationKey == TestVectors.bytes("conversation_key_b64"))
   }
 }
