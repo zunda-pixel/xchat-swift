@@ -15,7 +15,14 @@ let swiftSettings: [SwiftSetting] = [
 
 let package = Package(
   name: "XChat",
-  platforms: [.macOS(.v27), .iOS(.v27)],
+  platforms: [
+    .macOS(.v15),
+    .iOS(.v18),
+    .tvOS(.v18),
+    .macCatalyst(.v18),
+    .visionOS(.v2),
+    .watchOS(.v11),
+  ],
   products: [
     .library(name: "XChat", targets: ["XChat"])
   ],
