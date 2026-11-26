@@ -27,7 +27,7 @@ let package = Package(
     .library(name: "XChat", targets: ["XChat"])
   ],
   dependencies: [
-    .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.11.0"),
+    .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.12.0"),
     .package(url: "https://github.com/apple/swift-crypto.git", from: "5.1.1"),
     .package(url: "https://github.com/apple/swift-collections.git", from: "1.7.6"),
     .package(url: "https://github.com/apple/swift-algorithms.git", from: "1.2.1"),
